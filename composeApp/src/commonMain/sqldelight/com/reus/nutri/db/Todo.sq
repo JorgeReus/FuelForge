@@ -1,0 +1,10 @@
+CREATE TABLE todo (
+  id TEXT NOT NULL PRIMARY KEY,
+  name TEXT NOT NULL
+);
+
+selectAll:
+SELECT * FROM todo ORDER BY name;
+
+upsert:
+INSERT OR REPLACE INTO todo(id, name) VALUES (?, ?);
