@@ -15,8 +15,8 @@
           };
           androidAbi = if nixpkgs.lib.hasPrefix "aarch64" system then "arm64-v8a" else "x86_64";
           androidSdk = pkgs.androidenv.composeAndroidPackages {
-            platformVersions = [ "35" ];
-            buildToolsVersions = [ "34.0.0" "35.0.0" ];
+            platformVersions = [ "36" ];
+            buildToolsVersions = [ "34.0.0" "35.0.0" "36.1.0" ];
             abiVersions = [ androidAbi ];
             includeEmulator = true;
             includeSystemImages = true;
@@ -24,7 +24,7 @@
           };
         in {
           default = pkgs.mkShell {
-            packages = [ pkgs.jdk17 pkgs.gradle pkgs.kotlin androidSdk.androidsdk ];
+            packages = [ pkgs.jdk17 pkgs.gradle androidSdk.androidsdk ];
             JAVA_HOME = "${pkgs.jdk17}";
             ANDROID_HOME = "${androidSdk.androidsdk}/libexec/android-sdk";
             ANDROID_SDK_ROOT = "${androidSdk.androidsdk}/libexec/android-sdk";

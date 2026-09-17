@@ -9,7 +9,9 @@ val localDatabase: NutriDatabase by lazy {
     NutriDatabase(createDatabaseDriver())
 }
 
-suspend fun loadLocalTodos(): List<TodoItem> = localDatabase.todoQueries.selectAll().executeAsList()
+suspend fun loadLocalTodos(): List<TodoItem> = localDatabase.todoQueries.selectAll().executeAsList().map {
+    TodoItem(id = it.id.toIntOrNull() ?: 0, name = it.name)
+}
 
 suspend fun saveLocalTodos(items: List<TodoItem>) {
     localDatabase.transaction {

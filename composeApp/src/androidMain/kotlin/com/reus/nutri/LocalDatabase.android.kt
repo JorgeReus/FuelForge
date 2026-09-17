@@ -1,7 +1,7 @@
 package com.reus.nutri
 
 import android.content.Context
-import app.cash.sqldelight.android.AndroidSqliteDriver
+import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import app.cash.sqldelight.db.SqlDriver
 import com.reus.nutri.db.NutriDatabase
 

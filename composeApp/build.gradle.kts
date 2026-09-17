@@ -2,8 +2,8 @@ plugins {
     id("org.jetbrains.kotlin.multiplatform")
     id("com.android.application")
     id("org.jetbrains.compose")
-    id("org.jetbrains.kotlin.plugin.compose") version "2.2.20"
-    id("org.jetbrains.kotlin.plugin.serialization") version "2.2.20"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.2.21"
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.2.21"
     id("app.cash.sqldelight")
 }
 
@@ -25,7 +25,7 @@ kotlin {
             implementation(compose.material3)
             implementation(compose.ui)
             implementation(compose.materialIconsExtended)
-            implementation(platform("io.github.jan-tennert.supabase:bom:3.8.0"))
+            implementation(project.dependencies.platform("io.github.jan-tennert.supabase:bom:3.2.6"))
             implementation("io.github.jan-tennert.supabase:postgrest-kt")
             implementation("app.cash.sqldelight:runtime:2.1.0")
         }
@@ -51,12 +51,12 @@ sqldelight {
 
 android {
     namespace = "com.reus.nutri"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.reus.nutri"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
     }
