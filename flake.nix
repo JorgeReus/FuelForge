@@ -24,7 +24,7 @@
           };
         in {
           default = pkgs.mkShell {
-            packages = [ pkgs.jdk17 pkgs.gradle androidSdk.androidsdk ];
+            packages = [ pkgs.jdk17 pkgs.gradle pkgs.go androidSdk.androidsdk ];
             JAVA_HOME = "${pkgs.jdk17}";
             ANDROID_HOME = "${androidSdk.androidsdk}/libexec/android-sdk";
             ANDROID_SDK_ROOT = "${androidSdk.androidsdk}/libexec/android-sdk";
