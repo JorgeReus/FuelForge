@@ -188,6 +188,22 @@ class CheckInRepositoryTest {
     }
 
     @Test
+    fun signedOutRefreshWinsOverPendingMutationShortcut() = runBlocking {
+        val local = DailyCheckIn("local-id", "2026-09-20", soreness = 3)
+        saveLocalCheckIn(database, local, 1L, "user-1")
+        val repository = CheckInRepository(
+            remoteFetch = { error("must not fetch while signed out") },
+            remoteUpsert = { _, _ -> SyncResult.Synced },
+            nowEpochMs = { 2L },
+            currentUserId = { null },
+            database = database,
+        )
+
+        assertEquals(RefreshResult.SignedOut(local), repository.refresh("2026-09-20"))
+        assertEquals(local, loadLocalCheckIn(database, "2026-09-20"))
+    }
+
+    @Test
     fun notFoundAndOfflineRefreshesPreserveLocalData() = runBlocking {
         val local = DailyCheckIn("local-id", "2026-09-20", soreness = 3)
         saveLocalCheckIn(database, local, 1L)

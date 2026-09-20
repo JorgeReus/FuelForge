@@ -34,6 +34,7 @@ class CheckInRepository(
 
     suspend fun refresh(day: String): RefreshResult {
         val local = local(day)
+        if (currentUserId() == null) return RefreshResult.SignedOut(local)
         if (hasPendingCheckIn(database, day)) return RefreshResult.Offline(local)
         return when (val result = remoteFetch(day)) {
             is RemoteFetchResult.Found -> {

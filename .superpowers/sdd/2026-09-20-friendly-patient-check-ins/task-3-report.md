@@ -25,6 +25,8 @@ review findings, and removed the Todo prototype path.
 - Remote fetch distinguishes found, not-found, signed-out, and offline states.
 - Repository refresh exposes those states through the public `RefreshResult`
   type while retaining any local check-in.
+- Refresh checks authentication before treating a pending local mutation as an
+  offline state, so signed-out refreshes consistently return `SignedOut`.
 - Remote refresh preserves local data when a pending same-day mutation exists.
 - Same-day remote refresh preserves the existing local check-in ID and applies
   the replacement transactionally.
@@ -33,7 +35,8 @@ review findings, and removed the Todo prototype path.
 - Added focused Android unit tests for signed-out queue retention, account
   ownership mismatch, failed-upload attempt increments, pending-local refresh
   preservation, same-day ID reconciliation, authenticated owner/check-in
-  upload arguments, local readability after save, and successful sync deletion.
+  upload arguments, local readability after save, signed-out refresh ordering,
+  and successful sync deletion.
 
 ## Verification
 
