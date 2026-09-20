@@ -40,16 +40,61 @@ private val Green = Color(0xFF4BE277); private val Amber = Color(0xFFFFB95F); pr
 
 @Composable private fun Dashboard(pad: PaddingValues) {
     var water by remember { mutableIntStateOf(2400) }
+    var showCheckIn by remember { mutableStateOf(false) }
+    var checkIn by remember { mutableStateOf<DailyCheckIn?>(null) }
+    val checkInRepository = remember { createCheckInRepository() }
+    val signedIn = supabase.auth.currentUserOrNull() != null
+    val today = remember { kotlin.time.Clock.System.now().toString().take(10) }
+    LaunchedEffect(signedIn) {
+        if (signedIn) {
+            checkIn = checkInRepository.local(today)
+            checkInRepository.refresh(today)
+            checkIn = checkInRepository.local(today)
+        }
+    }
     LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Spacer(Modifier.height(4.dp)); Text("Good morning, Alex 👋", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); Text("●  Feast Window opens in 2h 15m", color = Mint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold); CoachBanner() }
         item { Fuel(water) { water = (water + 250).coerceAtMost(3500) } }
+        item { DailyCheckInCard(checkIn, signedIn) { if (signedIn) showCheckIn = true } }
         item { Workout() }
         item { Text("Meal Stream & Feast Window", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
         items(listOf("Breakfast Fuel" to "520 kcal · LOGGED 08:15 AM", "Lunch Synthesis" to "680 kcal · LOGGED 12:40 PM", "Pre-Workout Fuel" to "220 kcal · NEXT 3:30 PM", "Anabolic Flank Steak Feast" to "850 kcal · WINDOW 6:30 PM")) { Meal(it.first, it.second) }
         item { Row(Modifier.fillMaxWidth().background(Color(0xFF131B2E), RoundedCornerShape(12.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Surface(color = Green, shape = CircleShape, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.Person, null, tint = Color(0xFF003915), modifier = Modifier.padding(10.dp)) }; Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text("Sync with Coach", color = Ink, fontWeight = FontWeight.Bold); Text("Marcus is reviewing today's metrics", color = Muted, fontSize = 12.sp) }; Button({}) { Text("PING") } } }
         item { Spacer(Modifier.height(8.dp)) }
     }
+    if (showCheckIn && signedIn) {
+        CheckInSheet(
+            initial = checkIn ?: DailyCheckIn(newIdentifier(), today),
+            repository = checkInRepository,
+            onDismiss = { showCheckIn = false },
+            onSaved = { checkIn = it; showCheckIn = false },
+        )
+    }
 }
+
+@Composable private fun DailyCheckInCard(checkIn: DailyCheckIn?, signedIn: Boolean, onOpen: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(14.dp)) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Daily check-in", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    when { !signedIn -> "Sign in required"; checkIn == null -> "Take today's check-in"; else -> checkInSummary(checkIn) },
+                    color = if (!signedIn) Amber else Muted,
+                    fontSize = 12.sp,
+                )
+            }
+            Button(onClick = onOpen, enabled = signedIn, colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915))) {
+                Text(if (checkIn == null) "CHECK IN" else "EDIT")
+            }
+        }
+    }
+}
+
+private fun checkInSummary(checkIn: DailyCheckIn): String = buildList {
+    checkIn.weightGrams?.let { add("${it / 1000.0} kg") }
+    checkIn.sleepMinutes?.let { add("${it / 60}h ${it % 60}m sleep") }
+    if (checkIn.comments.isNotBlank()) add("Notes added")
+}.joinToString(" · ").ifBlank { "Completed today" }
 
 @Composable private fun CoachBanner() { Row(Modifier.fillMaxWidth().padding(top = 10.dp).background(Card, RoundedCornerShape(12.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Surface(color = Amber, shape = CircleShape, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.FitnessCenter, null, tint = Color(0xFF472A00), modifier = Modifier.padding(6.dp)) }; Spacer(Modifier.width(8.dp)); Text("Coach Marcus:  “Crush that leg day feast today!”", color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
 
