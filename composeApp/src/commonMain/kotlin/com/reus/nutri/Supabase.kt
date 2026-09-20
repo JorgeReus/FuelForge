@@ -33,14 +33,19 @@ val supabase = createSupabaseClient(
     install(Postgrest)
 }
 
-suspend fun fetchCheckIn(day: String): PatientCheckInDto? {
-    val userId = supabase.auth.currentUserOrNull()?.id ?: return null
-    return supabase.from("patient_check_ins").select {
-        filter {
-            eq("user_id", userId)
-            eq("recorded_on", day)
-        }
-    }.decodeList<PatientCheckInDto>().firstOrNull()
+suspend fun fetchCheckIn(day: String): RemoteFetchResult {
+    val userId = supabase.auth.currentUserOrNull()?.id ?: return RemoteFetchResult.SignedOut
+    return try {
+        val dto = supabase.from("patient_check_ins").select {
+            filter {
+                eq("user_id", userId)
+                eq("recorded_on", day)
+            }
+        }.decodeList<PatientCheckInDto>().firstOrNull()
+        dto?.let { RemoteFetchResult.Found(it.toDomain()) } ?: RemoteFetchResult.NotFound
+    } catch (_: Exception) {
+        RemoteFetchResult.Offline
+    }
 }
 
 suspend fun upsertCheckIn(dto: PatientCheckInDto): SyncResult {

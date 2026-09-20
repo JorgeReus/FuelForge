@@ -6,35 +6,57 @@ sealed interface SyncResult {
     data object Synced : SyncResult
     data object Pending : SyncResult
     data object SignedOut : SyncResult
+    data object OwnershipMismatch : SyncResult
+}
+
+sealed interface RemoteFetchResult {
+    data class Found(val checkIn: DailyCheckIn) : RemoteFetchResult
+    data object NotFound : RemoteFetchResult
+    data object SignedOut : RemoteFetchResult
+    data object Offline : RemoteFetchResult
 }
 
 class CheckInRepository(
-    private val remoteFetch: suspend (String) -> DailyCheckIn?,
-    private val remoteUpsert: suspend (DailyCheckIn) -> SyncResult,
+    private val remoteFetch: suspend (String) -> RemoteFetchResult,
+    private val remoteUpsert: suspend (String, DailyCheckIn) -> SyncResult,
     private val nowEpochMs: () -> Long,
+    private val currentUserId: () -> String?,
     private val database: NutriDatabase = localDatabase,
 ) {
     fun local(day: String): DailyCheckIn? = loadLocalCheckIn(database, day)
 
     suspend fun refresh(day: String): DailyCheckIn? {
-        val remote = remoteFetch(day) ?: return local(day)
-        replaceLocalCheckIn(database, remote, nowEpochMs())
-        return remote
+        val local = local(day)
+        if (hasPendingCheckIn(database, day)) return local
+        return when (val result = remoteFetch(day)) {
+            is RemoteFetchResult.Found -> {
+                val reconciled = result.checkIn.copy(id = local?.id ?: result.checkIn.id)
+                replaceLocalCheckIn(database, reconciled, nowEpochMs())
+                reconciled
+            }
+            RemoteFetchResult.NotFound,
+            RemoteFetchResult.SignedOut,
+            RemoteFetchResult.Offline -> local
+        }
     }
 
     suspend fun save(checkIn: DailyCheckIn): SyncResult {
-        saveLocalCheckIn(database, checkIn, nowEpochMs())
+        val userId = currentUserId() ?: return SyncResult.SignedOut
+        saveLocalCheckIn(database, checkIn, nowEpochMs(), userId)
         return syncPending()
     }
 
     suspend fun syncPending(): SyncResult {
         var result: SyncResult = SyncResult.Synced
+        val currentUser = currentUserId() ?: return SyncResult.SignedOut
         for (mutation in pendingLocalMutations(database)) {
-            val checkIn = kotlinx.serialization.json.Json.decodeFromString<DailyCheckIn>(mutation.payloadJson)
+            val queued = decodeQueuedCheckIn(mutation)
+            if (queued.ownerUserId != currentUser) return SyncResult.OwnershipMismatch
             try {
-                when (remoteUpsert(checkIn)) {
+                when (remoteUpsert(currentUser, queued.checkIn)) {
                     SyncResult.Synced -> database.checkInQueries.deleteMutation(mutation.id)
                     SyncResult.SignedOut -> return SyncResult.SignedOut
+                    SyncResult.OwnershipMismatch -> return SyncResult.OwnershipMismatch
                     SyncResult.Pending -> result = SyncResult.Pending
                 }
             } catch (_: Exception) {
@@ -47,10 +69,10 @@ class CheckInRepository(
 }
 
 fun createCheckInRepository(): CheckInRepository = CheckInRepository(
-    remoteFetch = { day -> fetchCheckIn(day)?.toDomain() },
-    remoteUpsert = { checkIn ->
-        val userId = supabase.auth.currentUserOrNull()?.id
-        if (userId == null) SyncResult.SignedOut else upsertCheckIn(checkIn.toDto(userId))
+    remoteFetch = ::fetchCheckIn,
+    remoteUpsert = { userId, checkIn ->
+        upsertCheckIn(checkIn.toDto(userId))
     },
     nowEpochMs = { kotlin.time.Clock.System.now().toEpochMilliseconds() },
+    currentUserId = { supabase.auth.currentUserOrNull()?.id },
 )

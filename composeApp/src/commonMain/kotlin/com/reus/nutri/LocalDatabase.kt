@@ -3,6 +3,7 @@ package com.reus.nutri
 import app.cash.sqldelight.db.SqlDriver
 import com.reus.nutri.db.NutriDatabase
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.Serializable
 
 expect fun createDatabaseDriver(): SqlDriver
 
@@ -20,6 +21,12 @@ data class PendingMutation(
     val attemptCount: Long,
 )
 
+@Serializable
+internal data class QueuedCheckIn(
+    val ownerUserId: String,
+    val checkIn: DailyCheckIn,
+)
+
 fun saveLocalCheckIn(checkIn: DailyCheckIn, nowEpochMs: Long) {
     saveLocalCheckIn(localDatabase, checkIn, nowEpochMs)
 }
@@ -31,11 +38,23 @@ fun pendingLocalMutations(): List<PendingMutation> =
     pendingLocalMutations(localDatabase)
 
 internal fun saveLocalCheckIn(database: NutriDatabase, checkIn: DailyCheckIn, nowEpochMs: Long) {
+    saveLocalCheckIn(database, checkIn, nowEpochMs, ownerUserId = null)
+}
+
+internal fun saveLocalCheckIn(
+    database: NutriDatabase,
+    checkIn: DailyCheckIn,
+    nowEpochMs: Long,
+    ownerUserId: String?,
+) {
     database.transaction {
         val existing = database.checkInQueries.checkInForDay(checkIn.recordedOn).executeAsOneOrNull()
         val persistedId = existing?.id ?: checkIn.id
         val persistedCheckIn = checkIn.copy(id = persistedId)
         val payloadJson = Json.encodeToString(persistedCheckIn)
+        val mutationPayload = ownerUserId?.let {
+            Json.encodeToString(QueuedCheckIn(it, persistedCheckIn))
+        } ?: payloadJson
 
         database.checkInQueries.deleteMutationsForEntity("patient_check_in", checkIn.id)
         if (existing != null && existing.id != checkIn.id) {
@@ -44,7 +63,7 @@ internal fun saveLocalCheckIn(database: NutriDatabase, checkIn: DailyCheckIn, no
         database.checkInQueries.upsertCheckIn(
             id = persistedId,
             recorded_on = persistedCheckIn.recordedOn,
-            payload_json = payloadJson,
+            payload_json = mutationPayload,
             updated_at_epoch_ms = nowEpochMs,
         )
         database.checkInQueries.enqueueMutation(
@@ -86,3 +105,16 @@ internal fun pendingLocalMutations(database: NutriDatabase): List<PendingMutatio
             attemptCount = it.attempt_count,
         )
     }
+
+internal fun hasPendingCheckIn(database: NutriDatabase, day: String): Boolean =
+    pendingLocalMutations(database).any { mutation ->
+        decodeQueuedCheckIn(mutation).checkIn.recordedOn == day
+    }
+
+internal fun decodeQueuedCheckIn(mutation: PendingMutation): QueuedCheckIn {
+    return runCatching {
+        Json.decodeFromString<QueuedCheckIn>(mutation.payloadJson)
+    }.getOrElse {
+        QueuedCheckIn("", Json.decodeFromString<DailyCheckIn>(mutation.payloadJson))
+    }
+}
