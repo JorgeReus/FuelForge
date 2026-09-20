@@ -20,7 +20,11 @@ review findings, and removed the Todo prototype path.
   local data. No user ID is hardcoded.
 - Every repository-created queue payload records its authenticated owner ID;
   ownership mismatches are retained and never uploaded.
+- Local check-in rows store plain `DailyCheckIn` JSON while queue rows store
+  the owner-enveloped payload, so authenticated saves remain locally readable.
 - Remote fetch distinguishes found, not-found, signed-out, and offline states.
+- Repository refresh exposes those states through the public `RefreshResult`
+  type while retaining any local check-in.
 - Remote refresh preserves local data when a pending same-day mutation exists.
 - Same-day remote refresh preserves the existing local check-in ID and applies
   the replacement transactionally.
@@ -28,7 +32,8 @@ review findings, and removed the Todo prototype path.
   no remaining source references.
 - Added focused Android unit tests for signed-out queue retention, account
   ownership mismatch, failed-upload attempt increments, pending-local refresh
-  preservation, same-day ID reconciliation, and successful sync deletion.
+  preservation, same-day ID reconciliation, authenticated owner/check-in
+  upload arguments, local readability after save, and successful sync deletion.
 
 ## Verification
 

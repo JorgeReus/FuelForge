@@ -16,6 +16,13 @@ sealed interface RemoteFetchResult {
     data object Offline : RemoteFetchResult
 }
 
+sealed interface RefreshResult {
+    data class Found(val checkIn: DailyCheckIn, val local: DailyCheckIn?) : RefreshResult
+    data class NotFound(val local: DailyCheckIn?) : RefreshResult
+    data class SignedOut(val local: DailyCheckIn?) : RefreshResult
+    data class Offline(val local: DailyCheckIn?) : RefreshResult
+}
+
 class CheckInRepository(
     private val remoteFetch: suspend (String) -> RemoteFetchResult,
     private val remoteUpsert: suspend (String, DailyCheckIn) -> SyncResult,
@@ -25,18 +32,18 @@ class CheckInRepository(
 ) {
     fun local(day: String): DailyCheckIn? = loadLocalCheckIn(database, day)
 
-    suspend fun refresh(day: String): DailyCheckIn? {
+    suspend fun refresh(day: String): RefreshResult {
         val local = local(day)
-        if (hasPendingCheckIn(database, day)) return local
+        if (hasPendingCheckIn(database, day)) return RefreshResult.Offline(local)
         return when (val result = remoteFetch(day)) {
             is RemoteFetchResult.Found -> {
                 val reconciled = result.checkIn.copy(id = local?.id ?: result.checkIn.id)
                 replaceLocalCheckIn(database, reconciled, nowEpochMs())
-                reconciled
+                RefreshResult.Found(reconciled, local)
             }
-            RemoteFetchResult.NotFound,
-            RemoteFetchResult.SignedOut,
-            RemoteFetchResult.Offline -> local
+            RemoteFetchResult.NotFound -> RefreshResult.NotFound(local)
+            RemoteFetchResult.SignedOut -> RefreshResult.SignedOut(local)
+            RemoteFetchResult.Offline -> RefreshResult.Offline(local)
         }
     }
 

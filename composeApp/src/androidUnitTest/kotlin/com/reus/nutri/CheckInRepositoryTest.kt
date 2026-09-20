@@ -65,9 +65,15 @@ class CheckInRepositoryTest {
     @Test
     fun successfulSyncRemovesOnlyTheSentMutation() = runBlocking {
         val checkIn = DailyCheckIn(id = "check-in-1", recordedOn = "2026-09-20")
+        var uploadedOwner: String? = null
+        var uploadedCheckIn: DailyCheckIn? = null
         val repository = CheckInRepository(
             remoteFetch = { RemoteFetchResult.NotFound },
-            remoteUpsert = { _, _ -> SyncResult.Synced },
+            remoteUpsert = { owner, uploaded ->
+                uploadedOwner = owner
+                uploadedCheckIn = uploaded
+                SyncResult.Synced
+            },
             nowEpochMs = { 1L },
             currentUserId = { "user-1" },
             database = database,
@@ -76,6 +82,8 @@ class CheckInRepositoryTest {
         assertEquals(SyncResult.Synced, repository.save(checkIn))
         assertEquals(emptyList(), pendingLocalMutations(database))
         assertEquals(checkIn, loadLocalCheckIn(database, checkIn.recordedOn))
+        assertEquals("user-1", uploadedOwner)
+        assertEquals(checkIn, uploadedCheckIn)
     }
 
     @Test
@@ -139,7 +147,7 @@ class CheckInRepositoryTest {
             database = database,
         )
 
-        assertEquals(local, repository.refresh("2026-09-20"))
+        assertEquals(RefreshResult.Offline(local), repository.refresh("2026-09-20"))
         assertEquals(local, loadLocalCheckIn(database, "2026-09-20"))
     }
 
@@ -156,7 +164,50 @@ class CheckInRepositoryTest {
             database = database,
         )
 
-        assertEquals(remote.copy(id = "local-id"), repository.refresh("2026-09-20"))
+        assertEquals(
+            RefreshResult.Found(remote.copy(id = "local-id"), local),
+            repository.refresh("2026-09-20"),
+        )
         assertEquals("local-id", loadLocalCheckIn(database, "2026-09-20")?.id)
+    }
+
+    @Test
+    fun signedOutRefreshPreservesLocalDataAndStatus() = runBlocking {
+        val local = DailyCheckIn("local-id", "2026-09-20", soreness = 3)
+        saveLocalCheckIn(database, local, 1L)
+        val repository = CheckInRepository(
+            remoteFetch = { RemoteFetchResult.SignedOut },
+            remoteUpsert = { _, _ -> SyncResult.Synced },
+            nowEpochMs = { 2L },
+            currentUserId = { null },
+            database = database,
+        )
+
+        assertEquals(RefreshResult.SignedOut(local), repository.refresh("2026-09-20"))
+        assertEquals(local, loadLocalCheckIn(database, "2026-09-20"))
+    }
+
+    @Test
+    fun notFoundAndOfflineRefreshesPreserveLocalData() = runBlocking {
+        val local = DailyCheckIn("local-id", "2026-09-20", soreness = 3)
+        saveLocalCheckIn(database, local, 1L)
+        val notFound = CheckInRepository(
+            remoteFetch = { RemoteFetchResult.NotFound },
+            remoteUpsert = { _, _ -> SyncResult.Synced },
+            nowEpochMs = { 2L },
+            currentUserId = { "user-1" },
+            database = database,
+        )
+        val offline = CheckInRepository(
+            remoteFetch = { RemoteFetchResult.Offline },
+            remoteUpsert = { _, _ -> SyncResult.Synced },
+            nowEpochMs = { 2L },
+            currentUserId = { "user-1" },
+            database = database,
+        )
+
+        assertEquals(RefreshResult.NotFound(local), notFound.refresh("2026-09-20"))
+        assertEquals(RefreshResult.Offline(local), offline.refresh("2026-09-20"))
+        assertEquals(local, loadLocalCheckIn(database, "2026-09-20"))
     }
 }

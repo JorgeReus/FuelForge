@@ -63,7 +63,7 @@ internal fun saveLocalCheckIn(
         database.checkInQueries.upsertCheckIn(
             id = persistedId,
             recorded_on = persistedCheckIn.recordedOn,
-            payload_json = mutationPayload,
+            payload_json = payloadJson,
             updated_at_epoch_ms = nowEpochMs,
         )
         database.checkInQueries.enqueueMutation(
@@ -71,7 +71,7 @@ internal fun saveLocalCheckIn(
             entity_type = "patient_check_in",
             entity_id = persistedId,
             operation = "upsert",
-            payload_json = payloadJson,
+            payload_json = mutationPayload,
             created_at_epoch_ms = nowEpochMs,
         )
     }
