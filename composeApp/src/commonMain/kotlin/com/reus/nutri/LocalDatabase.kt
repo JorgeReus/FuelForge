@@ -10,16 +10,6 @@ val localDatabase: NutriDatabase by lazy {
     NutriDatabase(createDatabaseDriver())
 }
 
-suspend fun loadLocalTodos(): List<TodoItem> = localDatabase.todoQueries.selectAll().executeAsList().map {
-    TodoItem(id = it.id.toIntOrNull() ?: 0, name = it.name)
-}
-
-suspend fun saveLocalTodos(items: List<TodoItem>) {
-    localDatabase.transaction {
-        items.forEach { localDatabase.todoQueries.upsert(it.id.toString(), it.name) }
-    }
-}
-
 data class PendingMutation(
     val id: String,
     val entityType: String,
@@ -72,6 +62,17 @@ internal fun loadLocalCheckIn(database: NutriDatabase, day: String): DailyCheckI
     database.checkInQueries.checkInForDay(day).executeAsOneOrNull()?.let {
         Json.decodeFromString<DailyCheckIn>(it.payload_json)
     }
+
+internal fun replaceLocalCheckIn(database: NutriDatabase, checkIn: DailyCheckIn, nowEpochMs: Long) {
+    database.transaction {
+        database.checkInQueries.upsertCheckIn(
+            id = checkIn.id,
+            recorded_on = checkIn.recordedOn,
+            payload_json = Json.encodeToString(checkIn),
+            updated_at_epoch_ms = nowEpochMs,
+        )
+    }
+}
 
 internal fun pendingLocalMutations(database: NutriDatabase): List<PendingMutation> =
     database.checkInQueries.pendingMutations().executeAsList().map {

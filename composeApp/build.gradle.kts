@@ -26,6 +26,7 @@ kotlin {
             implementation(compose.ui)
             implementation(compose.materialIconsExtended)
             implementation(project.dependencies.platform("io.github.jan-tennert.supabase:bom:3.2.6"))
+            implementation("io.github.jan-tennert.supabase:auth-kt")
             implementation("io.github.jan-tennert.supabase:postgrest-kt")
             implementation("app.cash.sqldelight:runtime:2.1.0")
         }

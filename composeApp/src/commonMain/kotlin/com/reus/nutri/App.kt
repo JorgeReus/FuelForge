@@ -19,8 +19,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 private val Bg = Color(0xFF0B1326); private val Card = Color(0xFF171F33); private val High = Color(0xFF222A3D)
 private val Track = Color(0xFF2D3449); private val Ink = Color(0xFFDAE2FD); private val Muted = Color(0xFFBCCBB9)
@@ -42,40 +40,14 @@ private val Green = Color(0xFF4BE277); private val Amber = Color(0xFFFFB95F); pr
 
 @Composable private fun Dashboard(pad: PaddingValues) {
     var water by remember { mutableIntStateOf(2400) }
-    var todos by remember { mutableStateOf<List<TodoItem>>(emptyList()) }
-    var todoError by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
-        try {
-            todos = withContext(Dispatchers.Default) { loadLocalTodos() }
-            val remote = withContext(Dispatchers.Default) { loadTodos() }
-            saveLocalTodos(remote)
-            todos = remote
-        } catch (error: Exception) {
-            todoError = error.message ?: "Unable to load todos"
-        }
-    }
     LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Spacer(Modifier.height(4.dp)); Text("Good morning, Alex 👋", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); Text("●  Feast Window opens in 2h 15m", color = Mint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold); CoachBanner() }
         item { Fuel(water) { water = (water + 250).coerceAtMost(3500) } }
-        item { TodoCard(todos, todoError) }
         item { Workout() }
         item { Text("Meal Stream & Feast Window", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
         items(listOf("Breakfast Fuel" to "520 kcal · LOGGED 08:15 AM", "Lunch Synthesis" to "680 kcal · LOGGED 12:40 PM", "Pre-Workout Fuel" to "220 kcal · NEXT 3:30 PM", "Anabolic Flank Steak Feast" to "850 kcal · WINDOW 6:30 PM")) { Meal(it.first, it.second) }
         item { Row(Modifier.fillMaxWidth().background(Color(0xFF131B2E), RoundedCornerShape(12.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Surface(color = Green, shape = CircleShape, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.Person, null, tint = Color(0xFF003915), modifier = Modifier.padding(10.dp)) }; Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text("Sync with Coach", color = Ink, fontWeight = FontWeight.Bold); Text("Marcus is reviewing today's metrics", color = Muted, fontSize = 12.sp) }; Button({}) { Text("PING") } } }
         item { Spacer(Modifier.height(8.dp)) }
-    }
-}
-
-@Composable private fun TodoCard(items: List<TodoItem>, error: String?) {
-    Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(14.dp)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Supabase Todos", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            when {
-                error != null -> Text("Could not load todos: $error", color = Amber, fontSize = 12.sp)
-                items.isEmpty() -> Text("No todos yet", color = Muted, fontSize = 13.sp)
-                else -> items.forEach { Text("• ${it.name}", color = Ink, fontSize = 14.sp) }
-            }
-        }
     }
 }
 

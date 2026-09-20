@@ -7,6 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.runBlocking
 
 class CheckInRepositoryTest {
     private val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
@@ -59,5 +60,20 @@ class CheckInRepositoryTest {
         assertEquals(1, mutations.size)
         assertEquals("check-in-1", mutations.single().entityId)
         assertEquals(saved, Json.decodeFromString<DailyCheckIn>(mutations.single().payloadJson))
+    }
+
+    @Test
+    fun successfulSyncRemovesOnlyTheSentMutation() = runBlocking {
+        val checkIn = DailyCheckIn(id = "check-in-1", recordedOn = "2026-09-20")
+        val repository = CheckInRepository(
+            remoteFetch = { null },
+            remoteUpsert = { SyncResult.Synced },
+            nowEpochMs = { 1L },
+            database = database,
+        )
+
+        assertEquals(SyncResult.Synced, repository.save(checkIn))
+        assertEquals(emptyList(), pendingLocalMutations(database))
+        assertEquals(checkIn, loadLocalCheckIn(database, checkIn.recordedOn))
     }
 }
