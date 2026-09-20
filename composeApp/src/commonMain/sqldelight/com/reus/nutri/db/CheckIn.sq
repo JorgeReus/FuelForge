@@ -26,6 +26,9 @@ enqueueMutation:
 INSERT OR REPLACE INTO pending_mutation(id, entity_type, entity_id, operation, payload_json, created_at_epoch_ms, attempt_count)
 VALUES (?, ?, ?, ?, ?, ?, 0);
 
+deleteMutationsForEntity:
+DELETE FROM pending_mutation WHERE entity_type = ? AND entity_id = ?;
+
 pendingMutations:
 SELECT * FROM pending_mutation ORDER BY created_at_epoch_ms ASC;
 

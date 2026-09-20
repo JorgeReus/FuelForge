@@ -31,18 +31,36 @@ data class PendingMutation(
 )
 
 fun saveLocalCheckIn(checkIn: DailyCheckIn, nowEpochMs: Long) {
-    val payloadJson = Json.encodeToString(checkIn)
-    localDatabase.transaction {
-        localDatabase.checkInQueries.upsertCheckIn(
-            id = checkIn.id,
-            recorded_on = checkIn.recordedOn,
+    saveLocalCheckIn(localDatabase, checkIn, nowEpochMs)
+}
+
+fun loadLocalCheckIn(day: String): DailyCheckIn? =
+    loadLocalCheckIn(localDatabase, day)
+
+fun pendingLocalMutations(): List<PendingMutation> =
+    pendingLocalMutations(localDatabase)
+
+internal fun saveLocalCheckIn(database: NutriDatabase, checkIn: DailyCheckIn, nowEpochMs: Long) {
+    database.transaction {
+        val existing = database.checkInQueries.checkInForDay(checkIn.recordedOn).executeAsOneOrNull()
+        val persistedId = existing?.id ?: checkIn.id
+        val persistedCheckIn = checkIn.copy(id = persistedId)
+        val payloadJson = Json.encodeToString(persistedCheckIn)
+
+        database.checkInQueries.deleteMutationsForEntity("patient_check_in", checkIn.id)
+        if (existing != null && existing.id != checkIn.id) {
+            database.checkInQueries.deleteMutationsForEntity("patient_check_in", existing.id)
+        }
+        database.checkInQueries.upsertCheckIn(
+            id = persistedId,
+            recorded_on = persistedCheckIn.recordedOn,
             payload_json = payloadJson,
             updated_at_epoch_ms = nowEpochMs,
         )
-        localDatabase.checkInQueries.enqueueMutation(
-            id = "check-in:${checkIn.id}",
+        database.checkInQueries.enqueueMutation(
+            id = "check-in:$persistedId",
             entity_type = "patient_check_in",
-            entity_id = checkIn.id,
+            entity_id = persistedId,
             operation = "upsert",
             payload_json = payloadJson,
             created_at_epoch_ms = nowEpochMs,
@@ -50,13 +68,13 @@ fun saveLocalCheckIn(checkIn: DailyCheckIn, nowEpochMs: Long) {
     }
 }
 
-fun loadLocalCheckIn(day: String): DailyCheckIn? =
-    localDatabase.checkInQueries.checkInForDay(day).executeAsOneOrNull()?.let {
+internal fun loadLocalCheckIn(database: NutriDatabase, day: String): DailyCheckIn? =
+    database.checkInQueries.checkInForDay(day).executeAsOneOrNull()?.let {
         Json.decodeFromString<DailyCheckIn>(it.payload_json)
     }
 
-fun pendingLocalMutations(): List<PendingMutation> =
-    localDatabase.checkInQueries.pendingMutations().executeAsList().map {
+internal fun pendingLocalMutations(database: NutriDatabase): List<PendingMutation> =
+    database.checkInQueries.pendingMutations().executeAsList().map {
         PendingMutation(
             id = it.id,
             entityType = it.entity_type,

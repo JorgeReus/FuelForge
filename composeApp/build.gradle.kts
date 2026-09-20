@@ -38,6 +38,9 @@ kotlin {
             implementation("io.ktor:ktor-client-darwin:3.3.0")
             implementation("app.cash.sqldelight:native-driver:2.1.0")
         }
+        androidUnitTest.dependencies {
+            implementation("app.cash.sqldelight:sqlite-driver:2.1.0")
+        }
     }
 }
 
