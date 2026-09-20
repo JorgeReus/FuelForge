@@ -1,0 +1,36 @@
+CREATE TABLE local_check_in (
+  id TEXT NOT NULL PRIMARY KEY,
+  recorded_on TEXT NOT NULL UNIQUE,
+  payload_json TEXT NOT NULL,
+  updated_at_epoch_ms INTEGER NOT NULL
+);
+
+CREATE TABLE pending_mutation (
+  id TEXT NOT NULL PRIMARY KEY,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at_epoch_ms INTEGER NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0
+);
+
+checkInForDay:
+SELECT * FROM local_check_in WHERE recorded_on = ?;
+
+upsertCheckIn:
+INSERT OR REPLACE INTO local_check_in(id, recorded_on, payload_json, updated_at_epoch_ms)
+VALUES (?, ?, ?, ?);
+
+enqueueMutation:
+INSERT OR REPLACE INTO pending_mutation(id, entity_type, entity_id, operation, payload_json, created_at_epoch_ms, attempt_count)
+VALUES (?, ?, ?, ?, ?, ?, 0);
+
+pendingMutations:
+SELECT * FROM pending_mutation ORDER BY created_at_epoch_ms ASC;
+
+deleteMutation:
+DELETE FROM pending_mutation WHERE id = ?;
+
+incrementMutationAttempts:
+UPDATE pending_mutation SET attempt_count = attempt_count + 1 WHERE id = ?;
