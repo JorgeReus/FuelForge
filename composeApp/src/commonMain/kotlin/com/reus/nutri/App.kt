@@ -42,20 +42,25 @@ private val Green = Color(0xFF4BE277); private val Amber = Color(0xFFFFB95F); pr
     var water by remember { mutableIntStateOf(2400) }
     var showCheckIn by remember { mutableStateOf(false) }
     var checkIn by remember { mutableStateOf<DailyCheckIn?>(null) }
+    var checkInStatus by remember { mutableStateOf<String?>(null) }
     val checkInRepository = remember { createCheckInRepository() }
     val signedIn = supabase.auth.currentUserOrNull() != null
     val today = remember { kotlin.time.Clock.System.now().toString().take(10) }
     LaunchedEffect(signedIn) {
         if (signedIn) {
             checkIn = checkInRepository.local(today)
-            checkInRepository.refresh(today)
-            checkIn = checkInRepository.local(today)
+            when (val result = checkInRepository.refresh(today)) {
+                is RefreshResult.Found -> { checkIn = result.checkIn; checkInStatus = "Synced" }
+                is RefreshResult.NotFound -> checkInStatus = if (result.local == null) null else "Saved locally"
+                is RefreshResult.SignedOut -> checkInStatus = "Sign in required"
+                is RefreshResult.Offline -> checkInStatus = if (result.local == null) "Offline" else "Saved locally · Sync pending"
+            }
         }
     }
     LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Spacer(Modifier.height(4.dp)); Text("Good morning, Alex 👋", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); Text("●  Feast Window opens in 2h 15m", color = Mint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold); CoachBanner() }
         item { Fuel(water) { water = (water + 250).coerceAtMost(3500) } }
-        item { DailyCheckInCard(checkIn, signedIn) { if (signedIn) showCheckIn = true } }
+        item { DailyCheckInCard(checkIn, signedIn, checkInStatus) { if (signedIn) showCheckIn = true } }
         item { Workout() }
         item { Text("Meal Stream & Feast Window", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
         items(listOf("Breakfast Fuel" to "520 kcal · LOGGED 08:15 AM", "Lunch Synthesis" to "680 kcal · LOGGED 12:40 PM", "Pre-Workout Fuel" to "220 kcal · NEXT 3:30 PM", "Anabolic Flank Steak Feast" to "850 kcal · WINDOW 6:30 PM")) { Meal(it.first, it.second) }
@@ -67,12 +72,12 @@ private val Green = Color(0xFF4BE277); private val Amber = Color(0xFFFFB95F); pr
             initial = checkIn ?: DailyCheckIn(newIdentifier(), today),
             repository = checkInRepository,
             onDismiss = { showCheckIn = false },
-            onSaved = { checkIn = it; showCheckIn = false },
+            onSaved = { checkIn = it },
         )
     }
 }
 
-@Composable private fun DailyCheckInCard(checkIn: DailyCheckIn?, signedIn: Boolean, onOpen: () -> Unit) {
+@Composable private fun DailyCheckInCard(checkIn: DailyCheckIn?, signedIn: Boolean, status: String?, onOpen: () -> Unit) {
     Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(14.dp)) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -82,6 +87,7 @@ private val Green = Color(0xFF4BE277); private val Amber = Color(0xFFFFB95F); pr
                     color = if (!signedIn) Amber else Muted,
                     fontSize = 12.sp,
                 )
+                status?.let { Text(it, color = if (it.contains("pending") || it == "Offline") Amber else Green, fontSize = 11.sp) }
             }
             Button(onClick = onOpen, enabled = signedIn, colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915))) {
                 Text(if (checkIn == null) "CHECK IN" else "EDIT")

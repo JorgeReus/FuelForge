@@ -22,4 +22,14 @@ class CheckInSheetTest {
         assertEquals(81250, form.toCheckIn().weightGrams)
         assertEquals(465, form.toCheckIn().sleepMinutes)
     }
+
+    @Test
+    fun selectingTheSameChoiceClearsIt() {
+        val form = CheckInFormState(DailyCheckIn(id = "id", recordedOn = "2026-09-20"))
+        val choice = CheckInMetric.Soreness.choices.last()
+        form.toggle(CheckInMetric.Soreness, choice)
+        form.toggle(CheckInMetric.Soreness, choice)
+
+        assertEquals(null, form.toCheckIn().soreness)
+    }
 }

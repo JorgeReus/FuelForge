@@ -35,7 +35,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -59,6 +64,10 @@ class CheckInFormState(initial: DailyCheckIn) {
 
     fun select(metric: CheckInMetric, choice: CheckInChoice) {
         selected[metric] = choice
+    }
+
+    fun toggle(metric: CheckInMetric, choice: CheckInChoice) {
+        if (selected[metric] == choice) clear(metric) else select(metric, choice)
     }
 
     fun clear(metric: CheckInMetric) {
@@ -111,7 +120,15 @@ fun CheckInSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
-    val form = remember(initial) { CheckInFormState(initial) }
+    val importedInitial = remember(initial, healthSnapshot) {
+        initial.copy(
+            weightGrams = healthSnapshot?.weightGrams ?: initial.weightGrams,
+            sleepMinutes = healthSnapshot?.sleepMinutes ?: initial.sleepMinutes,
+        )
+    }
+    val form = remember(importedInitial) { CheckInFormState(importedInitial) }
+    val weightFocusRequester = remember { FocusRequester() }
+    val sleepFocusRequester = remember { FocusRequester() }
     var saving by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
 
@@ -122,6 +139,8 @@ fun CheckInSheet(
             saving = saving,
             status = status,
             onDismiss = onDismiss,
+            weightFocusRequester = weightFocusRequester,
+            sleepFocusRequester = sleepFocusRequester,
             onSave = {
                 saving = true
                 status = null
@@ -153,6 +172,8 @@ private fun CheckInSheetContent(
     saving: Boolean,
     status: String?,
     onDismiss: () -> Unit,
+    weightFocusRequester: FocusRequester,
+    sleepFocusRequester: FocusRequester,
     onSave: () -> Unit,
 ) {
     Column(
@@ -168,7 +189,7 @@ private fun CheckInSheetContent(
         }
         HorizontalDivider(color = Track)
 
-        HealthImportRow("Weight", healthSnapshot?.weightGrams?.let { "${it / 1000.0} kg" }, healthSnapshot?.sourceLabel)
+        HealthImportRow("Weight", healthSnapshot?.weightGrams?.let { "${it / 1000.0} kg" }, healthSnapshot?.sourceLabel) { weightFocusRequester.requestFocus() }
         OutlinedTextField(
             value = form.weightKg,
             onValueChange = { form.weightKg = it },
@@ -176,12 +197,12 @@ private fun CheckInSheetContent(
             placeholder = { Text("Optional") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().focusRequester(weightFocusRequester),
         )
 
-        HealthImportRow("Sleep", healthSnapshot?.sleepMinutes?.let { "${it / 60}h ${it % 60}m" }, healthSnapshot?.sourceLabel)
+        HealthImportRow("Sleep", healthSnapshot?.sleepMinutes?.let { "${it / 60}h ${it % 60}m" }, healthSnapshot?.sourceLabel) { sleepFocusRequester.requestFocus() }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(form.sleepHours, { form.sleepHours = it }, label = { Text("Hours") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
+            OutlinedTextField(form.sleepHours, { form.sleepHours = it }, label = { Text("Hours") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f).focusRequester(sleepFocusRequester))
             OutlinedTextField(form.sleepMinutes, { form.sleepMinutes = it }, label = { Text("Minutes") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
         }
 
@@ -192,9 +213,14 @@ private fun CheckInSheetContent(
                     metric.choices.forEach { choice ->
                         FilterChip(
                             selected = form.choice(metric) == choice,
-                            onClick = { form.select(metric, choice) },
+                            onClick = {
+                                form.toggle(metric, choice)
+                            },
                             label = { Text(choice.label) },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).semantics {
+                                contentDescription = "${metric.title}: ${choice.label}"
+                                stateDescription = if (form.choice(metric) == choice) "Selected. Double tap to clear" else "Not selected"
+                            },
                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Green.copy(alpha = .2f), selectedLabelColor = Green),
                         )
                     }
@@ -211,6 +237,9 @@ private fun CheckInSheetContent(
         )
 
         status?.let { Text(it, color = if (it.contains("pending")) Amber else Green, style = MaterialTheme.typography.labelMedium) }
+        if (status != null && !saving) {
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Done") }
+        }
         Button(onClick = onSave, enabled = !saving, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915))) {
             Icon(if (saving) Icons.Default.CheckCircle else Icons.Default.Save, contentDescription = null)
             Text(if (saving) "Saving…" else "Save check-in", modifier = Modifier.padding(start = 8.dp))
@@ -220,12 +249,15 @@ private fun CheckInSheetContent(
 }
 
 @Composable
-private fun HealthImportRow(label: String, value: String?, source: String?) {
+private fun HealthImportRow(label: String, value: String?, source: String?, onEdit: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.labelLarge)
             Text(value?.let { "Imported from ${source ?: "Health"}: $it" } ?: "No data yet", color = Muted, style = MaterialTheme.typography.bodySmall)
         }
-        TextButton(onClick = {}) { Icon(Icons.Default.Edit, contentDescription = null); Text("Edit") }
+        TextButton(onClick = onEdit) {
+            Icon(Icons.Default.Edit, contentDescription = "Edit imported $label")
+            Text("Edit")
+        }
     }
 }
