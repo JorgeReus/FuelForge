@@ -95,41 +95,9 @@ internal fun replaceLocalCheckIn(database: NutriDatabase, checkIn: DailyCheckIn,
 }
 
 internal fun pendingLocalMutations(database: NutriDatabase, ownerUserId: String? = null): List<PendingMutation> {
-    val mutations = database.checkInQueries.pendingMutations().executeAsList().map {
-        PendingMutation(
-            id = it.id,
-            entityType = it.entity_type,
-            entityId = it.entity_id,
-            operation = it.operation,
-            payloadJson = it.payload_json,
-            createdAtEpochMs = it.created_at_epoch_ms,
-            attemptCount = it.attempt_count,
-        )
-    }
-    if (ownerUserId != null) mutations.forEach { adoptLegacyMutation(database, it, ownerUserId) }
     return database.checkInQueries.pendingMutations().executeAsList().map {
         PendingMutation(it.id, it.entity_type, it.entity_id, it.operation, it.payload_json, it.created_at_epoch_ms, it.attempt_count)
     }.filter { ownerUserId == null || decodeQueuedCheckIn(it).ownerUserId == ownerUserId }
-}
-
-private fun adoptLegacyMutation(database: NutriDatabase, mutation: PendingMutation, ownerUserId: String) {
-    val queued = decodeQueuedCheckIn(mutation)
-    if (queued.ownerUserId.isNotEmpty() || mutation.entityType != "patient_check_in" || mutation.operation != "upsert") return
-
-    val localRow = database.checkInQueries.checkInForDay(queued.checkIn.recordedOn).executeAsOneOrNull()
-    // Legacy rows have no owner. Adopt only an exact device-local row/payload match;
-    // anything ambiguous stays queued and can never be uploaded for this account.
-    if (localRow?.id != mutation.entityId || localRow.payload_json != mutation.payloadJson) return
-
-    database.checkInQueries.deleteMutation(mutation.id)
-    database.checkInQueries.enqueueMutation(
-        id = mutation.id,
-        entity_type = mutation.entityType,
-        entity_id = mutation.entityId,
-        operation = mutation.operation,
-        payload_json = Json.encodeToString(QueuedCheckIn(ownerUserId, queued.checkIn)),
-        created_at_epoch_ms = mutation.createdAtEpochMs,
-    )
 }
 
 internal fun hasPendingCheckIn(database: NutriDatabase, day: String, ownerUserId: String? = null): Boolean =

@@ -19,7 +19,6 @@ alter table public.workout_exercises
   add column if not exists min_reps integer,
   add column if not exists max_reps integer,
   add column if not exists tempo text,
-  add column if not exists target_rpe numeric(3,1),
   add column if not exists target_rir integer,
   add column if not exists notes text not null default '';
 
@@ -37,12 +36,10 @@ alter table public.workout_exercises
     check ((catalog_exercise_id is not null)::int + (custom_exercise_id is not null)::int = 1) not valid,
   add constraint workout_exercises_rep_range_check
     check (max_reps is null or min_reps is null or max_reps >= min_reps) not valid,
-  add constraint workout_exercises_rpe_check check (target_rpe between 0 and 10) not valid,
   add constraint workout_exercises_rir_check check (target_rir between 0 and 10) not valid;
 
 alter table public.workout_exercises validate constraint workout_exercises_source_check;
 alter table public.workout_exercises validate constraint workout_exercises_rep_range_check;
-alter table public.workout_exercises validate constraint workout_exercises_rpe_check;
 alter table public.workout_exercises validate constraint workout_exercises_rir_check;
 
 create policy "patients and coaches manage workouts" on public.workouts for all
@@ -62,7 +59,6 @@ with check (
 );
 
 alter table public.workout_sets
-  add column rpe numeric(3,1) check (rpe between 0 and 10),
   add column rir integer check (rir between 0 and 10),
   add column tempo text,
   add column rest_seconds integer check (rest_seconds >= 0),
@@ -154,11 +150,11 @@ begin
   insert into public.workout_exercises (
     workout_id, source_plan_exercise_id, catalog_exercise_id, custom_exercise_id,
     position, prescribed_sets, min_reps, max_reps, target_weight_grams,
-    rest_seconds, tempo, target_rpe, target_rir, notes
+    rest_seconds, tempo, target_rir, notes
   )
   select new_workout_id, id, catalog_exercise_id, custom_exercise_id,
     position, prescribed_sets, min_reps, max_reps, target_weight_grams,
-    rest_seconds, tempo, target_rpe, target_rir, notes
+    rest_seconds, tempo, target_rir, notes
   from public.workout_plan_exercises
   where workout_plan_day_id = plan_day_id
   order by position;

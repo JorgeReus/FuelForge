@@ -33,8 +33,6 @@ import platform.HealthKit.HKQuantityTypeIdentifierStepCount
 import platform.HealthKit.HKQuery
 import platform.HealthKit.HKSampleQuery
 import platform.HealthKit.HKSampleType
-import platform.HealthKit.HKStatisticsQuery
-import platform.HealthKit.HKStatisticsOptionCumulativeSum
 import platform.HealthKit.HKWorkoutType
 import platform.HealthKit.HKWorkout
 import platform.HealthKit.HKSampleSortIdentifierStartDate
@@ -70,6 +68,18 @@ private fun predicateForDay(day: String): NSPredicate? {
 }
 
 @OptIn(ExperimentalForeignApi::class)
+private fun instantaneousPredicateForDay(day: String): NSPredicate? {
+    val (start, end) = dayRange(day) ?: return null
+    return NSPredicate(format = "startDate >= %@ AND startDate < %@", start, end)
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private fun containedPredicateForDay(day: String): NSPredicate? {
+    val (start, end) = dayRange(day) ?: return null
+    return NSPredicate(format = "startDate >= %@ AND endDate <= %@", start, end)
+}
+
+@OptIn(ExperimentalForeignApi::class)
 private suspend fun requestReadAuthorization(store: HKHealthStore, readTypes: Set<HKObjectType>) =
     suspendCancellableCoroutine<Boolean> { continuation ->
         store.requestAuthorizationToShareTypes(null, readTypes = readTypes) { success, _ ->
@@ -89,19 +99,6 @@ private suspend fun readSamples(
         limit = HKObjectQueryNoLimit,
         sortDescriptors = listOf(NSSortDescriptor(key = HKSampleSortIdentifierStartDate, ascending = true)),
     ) { _, samples, _ -> continuation.resume(samples?.filterNotNull() ?: emptyList()) }
-    store.executeQuery(query)
-    continuation.invokeOnCancellation { store.stopQuery(query) }
-}
-
-@OptIn(ExperimentalForeignApi::class)
-private suspend fun statisticSum(
-    store: HKHealthStore,
-    type: HKQuantityType,
-    predicate: NSPredicate,
-): Double? = suspendCancellableCoroutine { continuation ->
-    val query = HKStatisticsQuery(type, predicate, HKStatisticsOptionCumulativeSum) { _, statistics, _ ->
-        continuation.resume(statistics?.sumQuantity()?.doubleValueForUnit(HKUnit.countUnit()))
-    }
     store.executeQuery(query)
     continuation.invokeOnCancellation { store.stopQuery(query) }
 }
@@ -154,6 +151,13 @@ private fun bodyMassGrams(samples: List<Any>): Int? = samples
     ?.let { round(it * gramsPerKilogram).toLong().coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt() }
 
 @OptIn(ExperimentalForeignApi::class)
+private fun stepCount(samples: List<Any>): Long? = samples
+    .filterIsInstance<HKQuantitySample>()
+    .sumOf { it.quantity.doubleValueForUnit(HKUnit.countUnit()) }
+    .toLong()
+    .takeIf { samples.isNotEmpty() }
+
+@OptIn(ExperimentalForeignApi::class)
 private fun workoutMinutes(samples: List<Any>, start: NSDate, end: NSDate): Int? = intervalMinutes(
     clippedIntervals(samples.filterIsInstance<HKWorkout>().map { it.startDate to it.endDate }, start, end),
 )
@@ -169,7 +173,7 @@ actual object HealthDataProvider {
         val (start, end) = dayRange(day) ?: return HealthDailySnapshot()
         val bodyMass = runCatching {
             val type = HKQuantityType.quantityTypeForIdentifier(HKQuantityTypeIdentifierBodyMass) ?: return@runCatching null
-            bodyMassGrams(readSamples(store, type, predicate))
+            bodyMassGrams(readSamples(store, type, instantaneousPredicateForDay(day) ?: return@runCatching null))
         }.getOrNull()
         val sleep = runCatching {
             val type = HKCategoryType.categoryTypeForIdentifier(HKCategoryTypeIdentifierSleepAnalysis) ?: return@runCatching null
@@ -177,7 +181,7 @@ actual object HealthDataProvider {
         }.getOrNull()
         val steps = runCatching {
             val type = HKQuantityType.quantityTypeForIdentifier(HKQuantityTypeIdentifierStepCount) ?: return@runCatching null
-            statisticSum(store, type, predicate)?.toLong()
+            stepCount(readSamples(store, type, containedPredicateForDay(day) ?: return@runCatching null))
         }.getOrNull()
         val activeMinutes = runCatching {
             workoutMinutes(readSamples(store, HKWorkoutType.workoutType(), predicate), start, end)

@@ -30,7 +30,7 @@ class CheckInRepositoryTest {
     }
 
     @Test
-    fun legacyLocalQueueIsAdoptedOnlyWhenItMatchesTheLocalRow() = runBlocking {
+    fun legacyLocalQueueIsNeverAdoptedWithoutPersistedOwnerProof() = runBlocking {
         val checkIn = DailyCheckIn("check-in-legacy", "2026-09-20", soreness = 4)
         database.checkInQueries.upsertCheckIn(
             id = checkIn.id,
@@ -44,9 +44,12 @@ class CheckInRepositoryTest {
             payload_json = Json.encodeToString(checkIn), created_at_epoch_ms = 1L,
         )
 
-        val repository = CheckInRepository({}, { _, _ -> SyncResult.Synced }, { 2L }, { "user-1" }, database)
+        var uploads = 0
+        val repository = CheckInRepository({}, { _, _ -> uploads++; SyncResult.Synced }, { 2L }, { "user-1" }, database)
 
         assertEquals(SyncResult.Synced, repository.syncPending())
+        assertEquals(0, uploads)
+        assertEquals(1, pendingLocalMutations(database).size)
     }
 
     @Test
@@ -152,6 +155,23 @@ class CheckInRepositoryTest {
         )
 
         assertEquals(SyncResult.OwnershipMismatch, repository.syncPending())
+        assertEquals(0, uploads)
+        assertEquals(1, pendingLocalMutations(database).size)
+    }
+
+    @Test
+    fun switchingAccountsDoesNotUploadThePreviousAccountsPendingMutation() = runBlocking {
+        saveLocalCheckIn(database, DailyCheckIn("check-in-1", "2026-09-20"), 1L, "user-1")
+        var uploads = 0
+        val repository = CheckInRepository(
+            remoteFetch = { RemoteFetchResult.NotFound },
+            remoteUpsert = { _, _ -> uploads++; SyncResult.Synced },
+            nowEpochMs = { 2L },
+            currentUserId = { "user-2" },
+            database = database,
+        )
+
+        assertEquals(SyncResult.Synced, repository.syncPending())
         assertEquals(0, uploads)
         assertEquals(1, pendingLocalMutations(database).size)
     }

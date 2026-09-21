@@ -47,7 +47,6 @@ create table public.workout_plan_exercises (
   target_weight_grams integer not null default 0 check (target_weight_grams >= 0),
   rest_seconds integer not null default 90 check (rest_seconds >= 0),
   tempo text,
-  target_rpe numeric(3,1) check (target_rpe between 0 and 10),
   target_rir integer check (target_rir between 0 and 10),
   notes text not null default '',
   created_at timestamptz not null default now(),

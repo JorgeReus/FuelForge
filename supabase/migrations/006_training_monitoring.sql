@@ -93,7 +93,7 @@ create table public.exercise_progress_snapshots (
   top_load_grams integer check (top_load_grams >= 0),
   top_reps integer check (top_reps >= 0),
   total_volume_grams integer check (total_volume_grams >= 0),
-  intensity numeric(5,2),
+  achieved_rir integer,
   notes text not null default '',
   check ((catalog_exercise_id is not null)::int + (custom_exercise_id is not null)::int = 1)
 );
