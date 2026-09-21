@@ -22,11 +22,16 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
+private const val readWeightPermission = "android.permission.health.READ_WEIGHT"
+private const val readSleepPermission = "android.permission.health.READ_SLEEP"
+private const val readStepsPermission = "android.permission.health.READ_STEPS"
+private const val readActivityPermission = "android.permission.health.READ_ACTIVITY_INTENSITY"
+
 private val readPermissions = setOf(
-    "android.permission.health.READ_WEIGHT",
-    "android.permission.health.READ_SLEEP",
-    "android.permission.health.READ_STEPS",
-    "android.permission.health.READ_ACTIVITY_INTENSITY",
+    readWeightPermission,
+    readSleepPermission,
+    readStepsPermission,
+    readActivityPermission,
 )
 
 private fun dayRange(day: String, zone: ZoneId = ZoneId.systemDefault()): Pair<Instant, Instant> {
@@ -44,6 +49,17 @@ private fun clientOrNull(context: Context): HealthConnectClient? =
 actual object HealthDataProvider {
     actual suspend fun readDailySnapshot(day: String): HealthDailySnapshot {
         val client = clientOrNull(androidContext) ?: return HealthDailySnapshot()
+        val grantedPermissions = runCatching {
+            client.permissionController.getGrantedPermissions()
+        }.getOrDefault(emptySet())
+        return readDailySnapshot(client, day, grantedPermissions)
+    }
+
+    internal suspend fun readDailySnapshot(
+        client: HealthConnectClient,
+        day: String,
+        grantedPermissions: Set<String>,
+    ): HealthDailySnapshot {
         val (start, end) = try {
             dayRange(day)
         } catch (_: RuntimeException) {
@@ -52,34 +68,48 @@ actual object HealthDataProvider {
 
         return try {
             val range = TimeRangeFilter.between(start, end)
-            val weight = runCatching {
+            val weight = if (readWeightPermission in grantedPermissions) runCatching {
                 client.readRecords(ReadRecordsRequest(WeightRecord::class, timeRangeFilter = range))
                     .records.maxByOrNull { it.time }
-            }.getOrNull()
-            val sleepMinutes = runCatching {
+            }.getOrNull() else null
+            val sleepMinutes = if (readSleepPermission in grantedPermissions) runCatching {
                 client.readRecords(ReadRecordsRequest(SleepSessionRecord::class, timeRangeFilter = range))
-                    .records.sumOf { session ->
+                    .records.map { session ->
                         val sessionStart = maxOf(session.startTime, start)
                         val sessionEnd = minOf(session.endTime, end)
-                        ((sessionEnd.toEpochMilli() - sessionStart.toEpochMilli()) / 60_000L).coerceAtLeast(0L)
-                    }.takeIf { it > 0 }?.toInt()
-            }.getOrNull()
-            val aggregate = runCatching {
+                        HealthInterval(sessionStart.toEpochMilli(), sessionEnd.toEpochMilli())
+                    }.let(::mergedDurationMillis)
+                    .div(60_000L)
+                    .takeIf { it > 0 }
+                    ?.coerceAtMost(Int.MAX_VALUE.toLong())
+                    ?.toInt()
+            }.getOrNull() else null
+            val steps = if (readStepsPermission in grantedPermissions) runCatching {
                 client.aggregate(
                     AggregateRequest(
-                        metrics = setOf(
-                            StepsRecord.COUNT_TOTAL,
-                            ActivityIntensityRecord.INTENSITY_MINUTES_TOTAL,
-                        ),
+                        metrics = setOf(StepsRecord.COUNT_TOTAL),
                         timeRangeFilter = range,
                     ),
-                )
-            }.getOrNull()
-            val steps = aggregate?.get(StepsRecord.COUNT_TOTAL)
-            val activeMinutes = aggregate?.get(ActivityIntensityRecord.INTENSITY_MINUTES_TOTAL)?.toInt()
+                )[StepsRecord.COUNT_TOTAL]
+            }.getOrNull() else null
+            val activeMinutes = if (readActivityPermission in grantedPermissions) runCatching {
+                client.aggregate(
+                    AggregateRequest(
+                        metrics = setOf(ActivityIntensityRecord.INTENSITY_MINUTES_TOTAL),
+                        timeRangeFilter = range,
+                    ),
+                )[ActivityIntensityRecord.INTENSITY_MINUTES_TOTAL]
+                    ?.coerceAtMost(Int.MAX_VALUE.toLong())
+                    ?.toInt()
+            }.getOrNull() else null
             val hasValue = weight != null || sleepMinutes != null || steps != null || activeMinutes != null
             HealthDailySnapshot(
-                weightGrams = weight?.weight?.inKilograms?.times(1_000.0)?.toLong()?.toInt(),
+                weightGrams = weight?.weight?.inKilograms
+                    ?.times(1_000.0)
+                    ?.let { kotlin.math.round(it) }
+                    ?.toLong()
+                    ?.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong())
+                    ?.toInt(),
                 sleepMinutes = sleepMinutes,
                 steps = steps,
                 activeMinutes = activeMinutes,
@@ -102,9 +132,13 @@ actual fun HealthImportAction(
     val scope = rememberCoroutineScope()
     val launcher = rememberLauncherForActivityResult(
         contract = PermissionController.createRequestPermissionResultContract(),
-    ) { _ ->
+    ) { grantedPermissions ->
         scope.launch {
-            onSnapshot(HealthDataProvider.readDailySnapshot(day))
+            val client = (context as? ComponentActivity)?.let(::clientOrNull)
+            onSnapshot(
+                if (client == null) HealthDailySnapshot()
+                else HealthDataProvider.readDailySnapshot(client, day, grantedPermissions),
+            )
         }
     }
     TextButton(
