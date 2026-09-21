@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.aggregate.AggregateRequest
 import androidx.health.connect.client.records.ActivityIntensityRecord
@@ -46,6 +47,26 @@ private fun clientOrNull(context: Context): HealthConnectClient? =
         null
     }
 
+private suspend inline fun <reified T : androidx.health.connect.client.records.Record> readAllRecords(
+    client: HealthConnectClient,
+    range: TimeRangeFilter,
+): List<T> {
+    val records = mutableListOf<T>()
+    var pageToken: String? = null
+    do {
+        val response = client.readRecords(
+            ReadRecordsRequest(
+                recordType = T::class,
+                timeRangeFilter = range,
+                pageToken = pageToken,
+            ),
+        )
+        records += response.records
+        pageToken = response.pageToken
+    } while (pageToken != null)
+    return records
+}
+
 actual object HealthDataProvider {
     actual suspend fun readDailySnapshot(day: String): HealthDailySnapshot {
         val client = clientOrNull(androidContext) ?: return HealthDailySnapshot()
@@ -69,12 +90,10 @@ actual object HealthDataProvider {
         return try {
             val range = TimeRangeFilter.between(start, end)
             val weight = if (readWeightPermission in grantedPermissions) runCatching {
-                client.readRecords(ReadRecordsRequest(WeightRecord::class, timeRangeFilter = range))
-                    .records.maxByOrNull { it.time }
+                readAllRecords<WeightRecord>(client, range).maxByOrNull { it.time }
             }.getOrNull() else null
             val sleepMinutes = if (readSleepPermission in grantedPermissions) runCatching {
-                client.readRecords(ReadRecordsRequest(SleepSessionRecord::class, timeRangeFilter = range))
-                    .records.map { session ->
+                readAllRecords<SleepSessionRecord>(client, range).map { session ->
                         val sessionStart = maxOf(session.startTime, start)
                         val sessionEnd = minOf(session.endTime, end)
                         HealthInterval(sessionStart.toEpochMilli(), sessionEnd.toEpochMilli())
@@ -92,7 +111,11 @@ actual object HealthDataProvider {
                     ),
                 )[StepsRecord.COUNT_TOTAL]
             }.getOrNull() else null
-            val activeMinutes = if (readActivityPermission in grantedPermissions) runCatching {
+            val activityIntensityAvailable = runCatching {
+                client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_ACTIVITY_INTENSITY) ==
+                    HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
+            }.getOrDefault(false)
+            val activeMinutes = if (readActivityPermission in grantedPermissions && activityIntensityAvailable) runCatching {
                 client.aggregate(
                     AggregateRequest(
                         metrics = setOf(ActivityIntensityRecord.INTENSITY_MINUTES_TOTAL),
