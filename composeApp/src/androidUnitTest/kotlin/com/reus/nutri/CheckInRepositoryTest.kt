@@ -30,6 +30,42 @@ class CheckInRepositoryTest {
     }
 
     @Test
+    fun legacyLocalQueueIsAdoptedOnlyWhenItMatchesTheLocalRow() = runBlocking {
+        val checkIn = DailyCheckIn("check-in-legacy", "2026-09-20", soreness = 4)
+        database.checkInQueries.upsertCheckIn(
+            id = checkIn.id,
+            recorded_on = checkIn.recordedOn,
+            payload_json = Json.encodeToString(checkIn),
+            updated_at_epoch_ms = 1L,
+        )
+        database.checkInQueries.enqueueMutation(
+            id = "check-in:${checkIn.id}", entity_type = "patient_check_in",
+            entity_id = checkIn.id, operation = "upsert",
+            payload_json = Json.encodeToString(checkIn), created_at_epoch_ms = 1L,
+        )
+
+        val repository = CheckInRepository({}, { _, _ -> SyncResult.Synced }, { 2L }, { "user-1" }, database)
+
+        assertEquals(SyncResult.Synced, repository.syncPending())
+    }
+
+    @Test
+    fun legacyQueueWithoutMatchingLocalRowIsNotUploaded() = runBlocking {
+        val checkIn = DailyCheckIn("check-in-legacy", "2026-09-20")
+        database.checkInQueries.enqueueMutation(
+            id = "check-in:${checkIn.id}", entity_type = "patient_check_in",
+            entity_id = checkIn.id, operation = "upsert",
+            payload_json = Json.encodeToString(checkIn), created_at_epoch_ms = 1L,
+        )
+        var uploads = 0
+        val repository = CheckInRepository({}, { _, _ -> uploads++; SyncResult.Synced }, { 2L }, { "user-1" }, database)
+
+        assertEquals(SyncResult.Synced, repository.syncPending())
+        assertEquals(0, uploads)
+        assertEquals(1, pendingLocalMutations(database).size)
+    }
+
+    @Test
     fun savingCheckInRoundTripsThroughLocalStorageAndJson() {
         val checkIn = DailyCheckIn(
             id = "check-in-1",

@@ -31,7 +31,6 @@ import platform.HealthKit.HKQuantityType
 import platform.HealthKit.HKQuantityTypeIdentifierBodyMass
 import platform.HealthKit.HKQuantityTypeIdentifierStepCount
 import platform.HealthKit.HKQuery
-import platform.HealthKit.HKQueryOptionStrictStartDate
 import platform.HealthKit.HKSampleQuery
 import platform.HealthKit.HKSampleType
 import platform.HealthKit.HKStatisticsQuery
@@ -66,7 +65,8 @@ private fun dayRange(day: String): Pair<NSDate, NSDate>? {
 @OptIn(ExperimentalForeignApi::class)
 private fun predicateForDay(day: String): NSPredicate? {
     val (start, end) = dayRange(day) ?: return null
-    return HKQuery.predicateForSamplesWithStartDate(start, endDate = end, options = HKQueryOptionStrictStartDate)
+    // Include samples that overlap the day; clipping and merging below keep only the in-day interval.
+    return NSPredicate(format = "startDate < %@ AND endDate > %@", end, start)
 }
 
 @OptIn(ExperimentalForeignApi::class)
