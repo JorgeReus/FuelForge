@@ -31,11 +31,7 @@ class CheckInRepository(
     private val database: NutriDatabase = localDatabase,
 ) {
     fun prefillFromHealth(checkIn: DailyCheckIn, snapshot: HealthDailySnapshot): DailyCheckIn =
-        checkIn.copy(
-            weightGrams = checkIn.weightGrams ?: snapshot.weightGrams,
-            sleepMinutes = checkIn.sleepMinutes ?: snapshot.sleepMinutes,
-            neatMinutes = checkIn.neatMinutes ?: snapshot.activeMinutes,
-        )
+        prefillFromHealth(checkIn, snapshot)
 
     fun local(day: String): DailyCheckIn? = loadLocalCheckIn(database, day)
 
@@ -82,6 +78,13 @@ class CheckInRepository(
         return if (pendingLocalMutations(database).isEmpty()) SyncResult.Synced else result
     }
 }
+
+fun prefillFromHealth(checkIn: DailyCheckIn, snapshot: HealthDailySnapshot): DailyCheckIn =
+    checkIn.copy(
+        weightGrams = checkIn.weightGrams ?: snapshot.weightGrams,
+        sleepMinutes = checkIn.sleepMinutes ?: snapshot.sleepMinutes,
+        neatMinutes = checkIn.neatMinutes ?: snapshot.activeMinutes,
+    )
 
 fun createCheckInRepository(): CheckInRepository = CheckInRepository(
     remoteFetch = ::fetchCheckIn,

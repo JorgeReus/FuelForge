@@ -5,18 +5,47 @@ import kotlin.test.assertEquals
 
 class CheckInRepositoryTest {
     @Test
-    fun healthSnapshotPrefillsOnlyMissingValues() {
-        val manualCheckIn = DailyCheckIn(id = "id", recordedOn = "2026-09-20")
-        val repository = CheckInRepository(
-            remoteFetch = { RemoteFetchResult.NotFound },
-            remoteUpsert = { _, _ -> SyncResult.Synced },
-            nowEpochMs = { 1L },
-            currentUserId = { null },
+    fun healthSnapshotFillsMissingHealthValues() {
+        val checkIn = DailyCheckIn(
+            id = "missing",
+            recordedOn = "2026-09-20",
+            soreness = 6,
+            comments = "Manual note",
         )
-        val merged = repository.prefillFromHealth(manualCheckIn, HealthDailySnapshot(weightGrams = 72400))
+        val merged = prefillFromHealth(
+            checkIn,
+            HealthDailySnapshot(weightGrams = 72400, sleepMinutes = 465, activeMinutes = 38),
+        )
 
         assertEquals(72400, merged.weightGrams)
-        assertEquals(manualCheckIn.soreness, merged.soreness)
-        assertEquals(manualCheckIn.comments, merged.comments)
+        assertEquals(465, merged.sleepMinutes)
+        assertEquals(38, merged.neatMinutes)
+        assertEquals(checkIn.soreness, merged.soreness)
+        assertEquals(checkIn.comments, merged.comments)
+    }
+
+    @Test
+    fun healthSnapshotDoesNotOverwriteExistingValuesOrSubjectiveFields() {
+        val checkIn = DailyCheckIn(
+            id = "existing",
+            recordedOn = "2026-09-20",
+            weightGrams = 70000,
+            sleepMinutes = 420,
+            neatMinutes = 25,
+            soreness = 6,
+            performance = 8,
+            motivation = 10,
+            hunger = 5,
+            fatigue = 4,
+            stress = 1,
+            sleepQuality = 8,
+            comments = "Manual note",
+        )
+        val merged = prefillFromHealth(
+            checkIn,
+            HealthDailySnapshot(weightGrams = 72400, sleepMinutes = 465, activeMinutes = 38),
+        )
+
+        assertEquals(checkIn, merged)
     }
 }
