@@ -5,6 +5,16 @@ import kotlin.test.assertEquals
 
 class CheckInRepositoryTest {
     @Test
+    fun repositoryPrefillDelegatesToHealthMerge() {
+        val repository = CheckInRepository({}, { _, _ -> SyncResult.Synced }, { 0L }, { null })
+
+        assertEquals(72400, repository.prefillFromHealth(
+            DailyCheckIn("id", "2026-09-20"),
+            HealthDailySnapshot(weightGrams = 72400),
+        ).weightGrams)
+    }
+
+    @Test
     fun healthSnapshotFillsMissingHealthValues() {
         val checkIn = DailyCheckIn(
             id = "missing",

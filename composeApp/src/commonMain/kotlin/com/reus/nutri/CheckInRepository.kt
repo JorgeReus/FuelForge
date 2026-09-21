@@ -31,7 +31,7 @@ class CheckInRepository(
     private val database: NutriDatabase = localDatabase,
 ) {
     fun prefillFromHealth(checkIn: DailyCheckIn, snapshot: HealthDailySnapshot): DailyCheckIn =
-        prefillFromHealth(checkIn, snapshot)
+        com.reus.nutri.prefillFromHealth(checkIn, snapshot)
 
     fun local(day: String): DailyCheckIn? = loadLocalCheckIn(database, day)
 
