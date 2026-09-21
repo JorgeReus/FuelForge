@@ -109,6 +109,12 @@ class CheckInFormState(initial: DailyCheckIn) {
 
 private fun Double.formatDecimal(): String = if (this % 1 == 0.0) toInt().toString() else toString()
 
+internal fun mergeHealthDefaults(initial: DailyCheckIn, healthSnapshot: HealthDailySnapshot?): DailyCheckIn =
+    initial.copy(
+        weightGrams = initial.weightGrams ?: healthSnapshot?.weightGrams,
+        sleepMinutes = initial.sleepMinutes ?: healthSnapshot?.sleepMinutes,
+    )
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CheckInSheet(
@@ -121,10 +127,7 @@ fun CheckInSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val importedInitial = remember(initial, healthSnapshot) {
-        initial.copy(
-            weightGrams = healthSnapshot?.weightGrams ?: initial.weightGrams,
-            sleepMinutes = healthSnapshot?.sleepMinutes ?: initial.sleepMinutes,
-        )
+        mergeHealthDefaults(initial, healthSnapshot)
     }
     val form = remember(importedInitial) { CheckInFormState(importedInitial) }
     val weightFocusRequester = remember { FocusRequester() }

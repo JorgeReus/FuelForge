@@ -9,11 +9,13 @@ Changes:
 - Added the Today dashboard entry point with completion summary.
 - Signed-out users see `Sign in required`; the form cannot be opened and the repository is not called.
 - Imported weight and sleep values now seed the editable form and are included when saved.
+- Existing patient-entered weight and sleep values take precedence over imported health defaults.
 - Health-row Edit actions focus the corresponding editable field.
 - Selected friendly choices toggle off, with an explicit form-state test for clearing.
 - Saved status remains visible in the sheet until the patient dismisses it; the dashboard also handles refresh outcomes.
 - Added screen-reader descriptions for selected/clearable choices and health edit actions.
 - Added form-state tests for friendly score mapping, unit conversion, and clearing.
+- Added a precedence test for existing patient values versus health defaults.
 
 Verification:
 

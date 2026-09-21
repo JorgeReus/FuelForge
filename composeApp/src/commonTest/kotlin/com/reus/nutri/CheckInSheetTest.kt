@@ -24,6 +24,15 @@ class CheckInSheetTest {
     }
 
     @Test
+    fun existingPatientValuesWinOverHealthDefaults() {
+        val initial = DailyCheckIn(id = "id", recordedOn = "2026-09-20", weightGrams = 80000, sleepMinutes = 420)
+        val merged = mergeHealthDefaults(initial, HealthDailySnapshot(weightGrams = 81250, sleepMinutes = 465))
+
+        assertEquals(80000, merged.weightGrams)
+        assertEquals(420, merged.sleepMinutes)
+    }
+
+    @Test
     fun selectingTheSameChoiceClearsIt() {
         val form = CheckInFormState(DailyCheckIn(id = "id", recordedOn = "2026-09-20"))
         val choice = CheckInMetric.Soreness.choices.last()
