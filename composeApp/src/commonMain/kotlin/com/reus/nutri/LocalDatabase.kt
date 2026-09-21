@@ -47,8 +47,9 @@ internal fun saveLocalCheckIn(
     nowEpochMs: Long,
     ownerUserId: String?,
 ) {
+    val storageDay = ownerUserId?.let { "$it:${checkIn.recordedOn}" } ?: checkIn.recordedOn
     database.transaction {
-        val existing = database.checkInQueries.checkInForDay(checkIn.recordedOn).executeAsOneOrNull()
+        val existing = database.checkInQueries.checkInForDay(storageDay).executeAsOneOrNull()
         val persistedId = existing?.id ?: checkIn.id
         val persistedCheckIn = checkIn.copy(id = persistedId)
         val payloadJson = Json.encodeToString(persistedCheckIn)
@@ -62,7 +63,7 @@ internal fun saveLocalCheckIn(
         }
         database.checkInQueries.upsertCheckIn(
             id = persistedId,
-            recorded_on = persistedCheckIn.recordedOn,
+            recorded_on = storageDay,
             payload_json = payloadJson,
             updated_at_epoch_ms = nowEpochMs,
         )
@@ -77,23 +78,23 @@ internal fun saveLocalCheckIn(
     }
 }
 
-internal fun loadLocalCheckIn(database: NutriDatabase, day: String): DailyCheckIn? =
-    database.checkInQueries.checkInForDay(day).executeAsOneOrNull()?.let {
+internal fun loadLocalCheckIn(database: NutriDatabase, day: String, ownerUserId: String? = null): DailyCheckIn? =
+    database.checkInQueries.checkInForDay(ownerUserId?.let { "$it:$day" } ?: day).executeAsOneOrNull()?.let {
         Json.decodeFromString<DailyCheckIn>(it.payload_json)
     }
 
-internal fun replaceLocalCheckIn(database: NutriDatabase, checkIn: DailyCheckIn, nowEpochMs: Long) {
+internal fun replaceLocalCheckIn(database: NutriDatabase, checkIn: DailyCheckIn, nowEpochMs: Long, ownerUserId: String? = null) {
     database.transaction {
         database.checkInQueries.upsertCheckIn(
             id = checkIn.id,
-            recorded_on = checkIn.recordedOn,
+            recorded_on = ownerUserId?.let { "$it:${checkIn.recordedOn}" } ?: checkIn.recordedOn,
             payload_json = Json.encodeToString(checkIn),
             updated_at_epoch_ms = nowEpochMs,
         )
     }
 }
 
-internal fun pendingLocalMutations(database: NutriDatabase): List<PendingMutation> =
+internal fun pendingLocalMutations(database: NutriDatabase, ownerUserId: String? = null): List<PendingMutation> =
     database.checkInQueries.pendingMutations().executeAsList().map {
         PendingMutation(
             id = it.id,
@@ -104,10 +105,10 @@ internal fun pendingLocalMutations(database: NutriDatabase): List<PendingMutatio
             createdAtEpochMs = it.created_at_epoch_ms,
             attemptCount = it.attempt_count,
         )
-    }
+    }.filter { ownerUserId == null || decodeQueuedCheckIn(it).ownerUserId == ownerUserId }
 
-internal fun hasPendingCheckIn(database: NutriDatabase, day: String): Boolean =
-    pendingLocalMutations(database).any { mutation ->
+internal fun hasPendingCheckIn(database: NutriDatabase, day: String, ownerUserId: String? = null): Boolean =
+    pendingLocalMutations(database, ownerUserId).any { mutation ->
         decodeQueuedCheckIn(mutation).checkIn.recordedOn == day
     }
 

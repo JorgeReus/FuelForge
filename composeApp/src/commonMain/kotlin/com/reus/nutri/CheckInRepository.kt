@@ -33,16 +33,16 @@ class CheckInRepository(
     fun prefillFromHealth(checkIn: DailyCheckIn, snapshot: HealthDailySnapshot): DailyCheckIn =
         com.reus.nutri.prefillFromHealth(checkIn, snapshot)
 
-    fun local(day: String): DailyCheckIn? = loadLocalCheckIn(database, day)
+    fun local(day: String): DailyCheckIn? = loadLocalCheckIn(database, day, currentUserId())
 
     suspend fun refresh(day: String): RefreshResult {
         val local = local(day)
         if (currentUserId() == null) return RefreshResult.SignedOut(local)
-        if (hasPendingCheckIn(database, day)) return RefreshResult.Offline(local)
+        if (hasPendingCheckIn(database, day, currentUserId())) return RefreshResult.Offline(local)
         return when (val result = remoteFetch(day)) {
             is RemoteFetchResult.Found -> {
                 val reconciled = result.checkIn.copy(id = local?.id ?: result.checkIn.id)
-                replaceLocalCheckIn(database, reconciled, nowEpochMs())
+                replaceLocalCheckIn(database, reconciled, nowEpochMs(), currentUserId())
                 RefreshResult.Found(reconciled, local)
             }
             RemoteFetchResult.NotFound -> RefreshResult.NotFound(local)
@@ -60,7 +60,7 @@ class CheckInRepository(
     suspend fun syncPending(): SyncResult {
         var result: SyncResult = SyncResult.Synced
         val currentUser = currentUserId() ?: return SyncResult.SignedOut
-        for (mutation in pendingLocalMutations(database)) {
+        for (mutation in pendingLocalMutations(database, currentUser)) {
             val queued = decodeQueuedCheckIn(mutation)
             if (queued.ownerUserId != currentUser) return SyncResult.OwnershipMismatch
             try {
@@ -75,7 +75,7 @@ class CheckInRepository(
                 result = SyncResult.Pending
             }
         }
-        return if (pendingLocalMutations(database).isEmpty()) SyncResult.Synced else result
+        return if (pendingLocalMutations(database, currentUser).isEmpty()) SyncResult.Synced else result
     }
 }
 
