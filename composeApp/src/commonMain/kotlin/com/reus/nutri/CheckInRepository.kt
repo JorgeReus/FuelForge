@@ -30,6 +30,13 @@ class CheckInRepository(
     private val currentUserId: () -> String?,
     private val database: NutriDatabase = localDatabase,
 ) {
+    fun prefillFromHealth(checkIn: DailyCheckIn, snapshot: HealthDailySnapshot): DailyCheckIn =
+        checkIn.copy(
+            weightGrams = checkIn.weightGrams ?: snapshot.weightGrams,
+            sleepMinutes = checkIn.sleepMinutes ?: snapshot.sleepMinutes,
+            neatMinutes = checkIn.neatMinutes ?: snapshot.activeMinutes,
+        )
+
     fun local(day: String): DailyCheckIn? = loadLocalCheckIn(database, day)
 
     suspend fun refresh(day: String): RefreshResult {

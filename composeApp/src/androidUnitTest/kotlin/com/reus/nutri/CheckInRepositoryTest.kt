@@ -226,4 +226,5 @@ class CheckInRepositoryTest {
         assertEquals(RefreshResult.Offline(local), offline.refresh("2026-09-20"))
         assertEquals(local, loadLocalCheckIn(database, "2026-09-20"))
     }
+
 }

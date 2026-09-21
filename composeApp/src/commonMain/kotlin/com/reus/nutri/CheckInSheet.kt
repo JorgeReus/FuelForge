@@ -48,7 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 
 class CheckInFormState(initial: DailyCheckIn) {
-    private val checkIn = initial
+    private var checkIn = initial
     private val selected = mutableStateMapOf<CheckInMetric, CheckInChoice>()
 
     var weightKg by mutableStateOf(initial.weightGrams?.let { grams -> (grams / 1000.0).formatDecimal() } ?: "")
@@ -75,6 +75,18 @@ class CheckInFormState(initial: DailyCheckIn) {
     }
 
     fun choice(metric: CheckInMetric): CheckInChoice? = selected[metric]
+
+    fun applyHealthSnapshot(snapshot: HealthDailySnapshot, prefill: (DailyCheckIn, HealthDailySnapshot) -> DailyCheckIn) {
+        val merged = prefill(toCheckIn(), snapshot)
+        checkIn = merged
+        if (weightKg.isBlank()) weightKg = merged.weightGrams?.let { (it / 1000.0).formatDecimal() } ?: ""
+        if (sleepHours.isBlank() && sleepMinutes.isBlank()) {
+            merged.sleepMinutes?.let {
+                sleepHours = (it / 60).toString()
+                sleepMinutes = (it % 60).toString()
+            }
+        }
+    }
 
     fun toCheckIn(): DailyCheckIn = checkIn.copy(
         weightGrams = weightKg.toDoubleOrNull()?.let { (it * 1000).toInt() },
@@ -110,10 +122,13 @@ class CheckInFormState(initial: DailyCheckIn) {
 private fun Double.formatDecimal(): String = if (this % 1 == 0.0) toInt().toString() else toString()
 
 internal fun mergeHealthDefaults(initial: DailyCheckIn, healthSnapshot: HealthDailySnapshot?): DailyCheckIn =
-    initial.copy(
-        weightGrams = initial.weightGrams ?: healthSnapshot?.weightGrams,
-        sleepMinutes = initial.sleepMinutes ?: healthSnapshot?.sleepMinutes,
-    )
+    healthSnapshot?.let {
+        initial.copy(
+            weightGrams = initial.weightGrams ?: it.weightGrams,
+            sleepMinutes = initial.sleepMinutes ?: it.sleepMinutes,
+            neatMinutes = initial.neatMinutes ?: it.activeMinutes,
+        )
+    } ?: initial
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -127,18 +142,20 @@ fun CheckInSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val importedInitial = remember(initial, healthSnapshot) {
-        mergeHealthDefaults(initial, healthSnapshot)
+        healthSnapshot?.let { repository.prefillFromHealth(initial, it) } ?: initial
     }
     val form = remember(importedInitial) { CheckInFormState(importedInitial) }
     val weightFocusRequester = remember { FocusRequester() }
     val sleepFocusRequester = remember { FocusRequester() }
     var saving by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
+    var importedSnapshot by remember(healthSnapshot) { mutableStateOf(healthSnapshot) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         CheckInSheetContent(
             form = form,
-            healthSnapshot = healthSnapshot,
+            day = initial.recordedOn,
+            importedSnapshot = importedSnapshot,
             saving = saving,
             status = status,
             onDismiss = onDismiss,
@@ -164,6 +181,10 @@ fun CheckInSheet(
                     saving = false
                 }
             },
+            onHealthSnapshot = { snapshot ->
+                importedSnapshot = snapshot
+                form.applyHealthSnapshot(snapshot, repository::prefillFromHealth)
+            },
         )
     }
 }
@@ -171,13 +192,15 @@ fun CheckInSheet(
 @Composable
 private fun CheckInSheetContent(
     form: CheckInFormState,
-    healthSnapshot: HealthDailySnapshot?,
+    day: String,
+    importedSnapshot: HealthDailySnapshot?,
     saving: Boolean,
     status: String?,
     onDismiss: () -> Unit,
     weightFocusRequester: FocusRequester,
     sleepFocusRequester: FocusRequester,
     onSave: () -> Unit,
+    onHealthSnapshot: (HealthDailySnapshot) -> Unit,
 ) {
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
@@ -192,7 +215,20 @@ private fun CheckInSheetContent(
         }
         HorizontalDivider(color = Track)
 
-        HealthImportRow("Weight", healthSnapshot?.weightGrams?.let { "${it / 1000.0} kg" }, healthSnapshot?.sourceLabel) { weightFocusRequester.requestFocus() }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Optional health import", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    if (importedSnapshot == null) "Prefills weight, sleep, and movement when available"
+                    else "Imported values are still editable",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            HealthImportAction(day, onHealthSnapshot)
+        }
+
+        HealthImportRow("Weight", importedSnapshot?.weightGrams?.let { "${it / 1000.0} kg" }, importedSnapshot?.sourceLabel) { weightFocusRequester.requestFocus() }
         OutlinedTextField(
             value = form.weightKg,
             onValueChange = { form.weightKg = it },
@@ -203,7 +239,7 @@ private fun CheckInSheetContent(
             modifier = Modifier.fillMaxWidth().focusRequester(weightFocusRequester),
         )
 
-        HealthImportRow("Sleep", healthSnapshot?.sleepMinutes?.let { "${it / 60}h ${it % 60}m" }, healthSnapshot?.sourceLabel) { sleepFocusRequester.requestFocus() }
+        HealthImportRow("Sleep", importedSnapshot?.sleepMinutes?.let { "${it / 60}h ${it % 60}m" }, importedSnapshot?.sourceLabel) { sleepFocusRequester.requestFocus() }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(form.sleepHours, { form.sleepHours = it }, label = { Text("Hours") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f).focusRequester(sleepFocusRequester))
             OutlinedTextField(form.sleepMinutes, { form.sleepMinutes = it }, label = { Text("Minutes") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
