@@ -9,6 +9,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.launch
 import platform.Foundation.NSDate
 import platform.Foundation.NSDateFormatter
+import platform.Foundation.NSCalendar
+import platform.Foundation.NSCalendarUnitDay
 import platform.Foundation.NSLocale
 import platform.Foundation.NSTimeZone
 import platform.Foundation.NSPredicate
@@ -40,6 +42,7 @@ import platform.HealthKit.HKSampleSortIdentifierStartDate
 import platform.HealthKit.HKUnit
 import platform.HealthKit.HKMetricPrefixKilo
 import kotlin.coroutines.resume
+import kotlin.math.round
 
 private const val gramsPerKilogram = 1_000.0
 private const val secondsPerMinute = 60.0
@@ -52,7 +55,12 @@ private fun dayRange(day: String): Pair<NSDate, NSDate>? {
         dateFormat = "yyyy-MM-dd"
     }
     val start = formatter.dateFromString(day) ?: return null
-    return start to NSDate.dateWithTimeIntervalSince1970(start.timeIntervalSince1970 + 86_400.0)
+    return start to NSCalendar.currentCalendar.dateByAddingUnit(
+        NSCalendarUnitDay,
+        value = 1,
+        toDate = start,
+        options = 0u,
+    )!!
 }
 
 @OptIn(ExperimentalForeignApi::class)
@@ -92,14 +100,39 @@ private suspend fun statisticSum(
     predicate: NSPredicate,
 ): Double? = suspendCancellableCoroutine { continuation ->
     val query = HKStatisticsQuery(type, predicate, HKStatisticsOptionCumulativeSum) { _, statistics, _ ->
-        continuation.resume(statistics?.sumQuantity()?.doubleValueForUnit(type.defaultUnit))
+        continuation.resume(statistics?.sumQuantity()?.doubleValueForUnit(HKUnit.countUnit()))
     }
     store.executeQuery(query)
     continuation.invokeOnCancellation { store.stopQuery(query) }
 }
 
 @OptIn(ExperimentalForeignApi::class)
-private fun sleepMinutes(samples: List<Any>): Int? {
+private fun intervalMinutes(samples: List<Pair<Double, Double>>): Int? {
+    val minutes = samples.sortedBy { it.first }.fold(mutableListOf<Pair<Double, Double>>()) { merged, interval ->
+        val previous = merged.lastOrNull()
+        if (previous != null && interval.first <= previous.second) {
+            merged[merged.lastIndex] = previous.first to maxOf(previous.second, interval.second)
+        } else {
+            merged += interval
+        }
+        merged
+    }.sumOf { (start, end) -> (end - start) / secondsPerMinute }
+    return minutes.toInt().takeIf { it > 0 }
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private fun clippedIntervals(
+    samples: List<Pair<NSDate, NSDate>>,
+    start: NSDate,
+    end: NSDate,
+): List<Pair<Double, Double>> = samples.mapNotNull { (sampleStart, sampleEnd) ->
+    val clippedStart = maxOf(sampleStart.timeIntervalSince1970, start.timeIntervalSince1970)
+    val clippedEnd = minOf(sampleEnd.timeIntervalSince1970, end.timeIntervalSince1970)
+    (clippedStart to clippedEnd).takeIf { it.first < it.second }
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private fun sleepMinutes(samples: List<Any>, start: NSDate, end: NSDate): Int? {
     val asleepValues = setOf(
         HKCategoryValueSleepAnalysisAsleep,
         HKCategoryValueSleepAnalysisAsleepCore,
@@ -107,10 +140,9 @@ private fun sleepMinutes(samples: List<Any>): Int? {
         HKCategoryValueSleepAnalysisAsleepREM,
         HKCategoryValueSleepAnalysisAsleepUnspecified,
     ).map { it.toLong() }.toSet()
-    val minutes = samples.filterIsInstance<HKCategorySample>()
+    return intervalMinutes(clippedIntervals(samples.filterIsInstance<HKCategorySample>()
         .filter { it.value.toLong() in asleepValues }
-        .sumOf { it.endDate.timeIntervalSinceDate(it.startDate) / secondsPerMinute }
-    return minutes.toInt().takeIf { it > 0 }
+        .map { it.startDate to it.endDate }, start, end))
 }
 
 @OptIn(ExperimentalForeignApi::class)
@@ -119,14 +151,12 @@ private fun bodyMassGrams(samples: List<Any>): Int? = samples
     .maxByOrNull { it.startDate.timeIntervalSince1970 }
     ?.quantity
     ?.doubleValueForUnit(HKUnit.gramUnitWithMetricPrefix(HKMetricPrefixKilo))
-    ?.let { (it * gramsPerKilogram).toLong().coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt() }
+    ?.let { round(it * gramsPerKilogram).toLong().coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt() }
 
 @OptIn(ExperimentalForeignApi::class)
-private fun workoutMinutes(samples: List<Any>): Int? {
-    val minutes = samples.filterIsInstance<HKWorkout>()
-        .sumOf { it.duration / secondsPerMinute }
-    return minutes.toInt().takeIf { it > 0 }
-}
+private fun workoutMinutes(samples: List<Any>, start: NSDate, end: NSDate): Int? = intervalMinutes(
+    clippedIntervals(samples.filterIsInstance<HKWorkout>().map { it.startDate to it.endDate }, start, end),
+)
 
 @OptIn(ExperimentalForeignApi::class)
 private fun healthStore(): HKHealthStore? = HKHealthStore().takeIf { HKHealthStore.isHealthDataAvailable() }
@@ -136,20 +166,21 @@ actual object HealthDataProvider {
     actual suspend fun readDailySnapshot(day: String): HealthDailySnapshot {
         val store = healthStore() ?: return HealthDailySnapshot()
         val predicate = predicateForDay(day) ?: return HealthDailySnapshot()
+        val (start, end) = dayRange(day) ?: return HealthDailySnapshot()
         val bodyMass = runCatching {
             val type = HKQuantityType.quantityTypeForIdentifier(HKQuantityTypeIdentifierBodyMass) ?: return@runCatching null
             bodyMassGrams(readSamples(store, type, predicate))
         }.getOrNull()
         val sleep = runCatching {
             val type = HKCategoryType.categoryTypeForIdentifier(HKCategoryTypeIdentifierSleepAnalysis) ?: return@runCatching null
-            sleepMinutes(readSamples(store, type, predicate))
+            sleepMinutes(readSamples(store, type, predicate), start, end)
         }.getOrNull()
         val steps = runCatching {
             val type = HKQuantityType.quantityTypeForIdentifier(HKQuantityTypeIdentifierStepCount) ?: return@runCatching null
             statisticSum(store, type, predicate)?.toLong()
         }.getOrNull()
         val activeMinutes = runCatching {
-            workoutMinutes(readSamples(store, HKWorkoutType.workoutType(), predicate))
+            workoutMinutes(readSamples(store, HKWorkoutType.workoutType(), predicate), start, end)
         }.getOrNull()
         val hasValue = bodyMass != null || sleep != null || steps != null || activeMinutes != null
         return HealthDailySnapshot(bodyMass, sleep, steps, activeMinutes, "Apple Health".takeIf { hasValue })
