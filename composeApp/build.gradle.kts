@@ -32,6 +32,7 @@ kotlin {
         }
         androidMain.dependencies {
             implementation("androidx.activity:activity-compose:1.10.1")
+            implementation("androidx.health.connect:connect-client:1.1.0-alpha12")
             implementation("io.ktor:ktor-client-android:3.3.0")
             implementation("app.cash.sqldelight:android-driver:2.1.0")
         }
