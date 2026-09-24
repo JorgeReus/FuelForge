@@ -26,8 +26,8 @@ data class PatientCheckInDto(
 )
 
 val supabase = createSupabaseClient(
-    supabaseUrl = "https://wwcemcbyesjqoshksnfv.supabase.co",
-    supabaseKey = "sb_publishable_g_fMcwqXouPxY5MASw0Etg_uFTvUvdR",
+    supabaseUrl = GeneratedSupabaseConfig.url,
+    supabaseKey = GeneratedSupabaseConfig.publishableKey,
 ) {
     install(Auth)
     install(Postgrest)

@@ -19,16 +19,51 @@ kotlin {
     }
 
     sourceSets {
-        commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.ui)
-            implementation(compose.materialIconsExtended)
-            implementation(project.dependencies.platform("io.github.jan-tennert.supabase:bom:3.2.6"))
-            implementation("io.github.jan-tennert.supabase:auth-kt")
-            implementation("io.github.jan-tennert.supabase:postgrest-kt")
-            implementation("app.cash.sqldelight:runtime:2.1.0")
+        val generatedSupabaseDir = layout.buildDirectory.dir("generated/supabase/commonMain/kotlin")
+        val generateSupabaseConfig by tasks.registering {
+            val supabaseUrl = providers.environmentVariable("SUPABASE_URL")
+                .orElse("")
+            val supabasePublishableKey = providers.environmentVariable("SUPABASE_PUBLISHABLE_KEY")
+                .orElse("")
+            inputs.property("supabaseUrl", supabaseUrl)
+            inputs.property("supabasePublishableKey", supabasePublishableKey)
+            outputs.dir(generatedSupabaseDir)
+            doLast {
+                val url = supabaseUrl.get()
+                val key = supabasePublishableKey.get()
+                check(url.isNotBlank()) { "SUPABASE_URL is required; load nix/env/<APP_ENV>.env via direnv" }
+                check(key.startsWith("sb_publishable_")) {
+                    "SUPABASE_PUBLISHABLE_KEY must be a publishable key"
+                }
+                val output = generatedSupabaseDir.get().file("com/reus/nutri/GeneratedSupabaseConfig.kt").asFile
+                output.parentFile.mkdirs()
+                output.writeText(
+                    """
+                    package com.reus.nutri
+
+                    internal object GeneratedSupabaseConfig {
+                        const val url = ${url.quoteKotlin()}
+                        const val publishableKey = ${key.quoteKotlin()}
+                    }
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        commonMain {
+            kotlin.srcDir(generatedSupabaseDir)
+            kotlin.srcDir(generateSupabaseConfig)
+            dependencies {
+                implementation(compose.runtime)
+                implementation(compose.foundation)
+                implementation(compose.material3)
+                implementation(compose.ui)
+                implementation(compose.materialIconsExtended)
+                implementation(project.dependencies.platform("io.github.jan-tennert.supabase:bom:3.2.6"))
+                implementation("io.github.jan-tennert.supabase:auth-kt")
+                implementation("io.github.jan-tennert.supabase:postgrest-kt")
+                implementation("app.cash.sqldelight:runtime:2.1.0")
+            }
         }
         androidMain.dependencies {
             implementation("androidx.activity:activity-compose:1.10.1")
@@ -46,7 +81,10 @@ kotlin {
             implementation("app.cash.sqldelight:sqlite-driver:2.1.0")
         }
     }
+
 }
+
+fun String.quoteKotlin(): String = "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 sqldelight {
     databases {
