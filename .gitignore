@@ -28,6 +28,10 @@ avd/
 result
 result-*
 
+
+# Local Supabase environment values
+nix/env/*.env
+!nix/env/*.env.example
 # OS/editor files
 .DS_Store
 *.swp
