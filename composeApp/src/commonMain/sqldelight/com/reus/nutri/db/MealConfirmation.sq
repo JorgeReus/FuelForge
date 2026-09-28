@@ -1,0 +1,14 @@
+CREATE TABLE local_meal_confirmation (
+  meal_id TEXT NOT NULL,
+  confirmed_on TEXT NOT NULL,
+  PRIMARY KEY (meal_id, confirmed_on)
+);
+
+confirmedMealIdsForDay:
+SELECT meal_id FROM local_meal_confirmation WHERE confirmed_on = ?;
+
+confirmMeal:
+INSERT OR REPLACE INTO local_meal_confirmation(meal_id, confirmed_on) VALUES (?, ?);
+
+unconfirmMeal:
+DELETE FROM local_meal_confirmation WHERE meal_id = ? AND confirmed_on = ?;

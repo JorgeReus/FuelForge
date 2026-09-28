@@ -163,12 +163,24 @@ private fun NutriApp(displayName: String) {
 @Composable private fun Header() { TopAppBar(title = { Column { Text("FEAST FIT", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("Today (Feast)", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) } }, actions = { IconButton({}) { Icon(Icons.Default.Notifications, null, tint = Muted) }; Surface(color = Green, shape = CircleShape, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Person, null, tint = Color(0xFF003915), modifier = Modifier.padding(7.dp)) }; Spacer(Modifier.width(16.dp)) }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Bg)) }
 
 @Composable private fun Dashboard(pad: PaddingValues, displayName: String) {
+    val today = remember { kotlin.time.Clock.System.now().toString().take(10) }
     var water by remember { mutableIntStateOf(2400) }
     var selectedMeal by remember { mutableStateOf<MealDto?>(null) }
+    var confirmedMealIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     if (selectedMeal != null) {
         MealDetailScreen(
             meal = selectedMeal!!,
+            confirmed = selectedMeal!!.id in confirmedMealIds,
             onBack = { selectedMeal = null },
+            onConfirmationChanged = { confirmed ->
+                if (confirmed) {
+                    localDatabase.mealConfirmationQueries.confirmMeal(selectedMeal!!.id, today)
+                    confirmedMealIds = confirmedMealIds + selectedMeal!!.id
+                } else {
+                    localDatabase.mealConfirmationQueries.unconfirmMeal(selectedMeal!!.id, today)
+                    confirmedMealIds = confirmedMealIds - selectedMeal!!.id
+                }
+            },
         )
         return
     }
@@ -177,7 +189,6 @@ private fun NutriApp(displayName: String) {
     var checkInStatus by remember { mutableStateOf<String?>(null) }
     val checkInRepository = remember { createCheckInRepository() }
     val signedIn = supabase.auth.currentUserOrNull() != null
-    val today = remember { kotlin.time.Clock.System.now().toString().take(10) }
     val weekday = remember(today) { isoWeekday(today) }
     var meals by remember { mutableStateOf<List<MealDto>>(emptyList()) }
     LaunchedEffect(signedIn) {
@@ -190,15 +201,23 @@ private fun NutriApp(displayName: String) {
             }
         }
     }
+    LaunchedEffect(today) {
+        confirmedMealIds = localDatabase.mealConfirmationQueries.confirmedMealIdsForDay(today)
+            .executeAsList().toSet()
+    }
     LaunchedEffect(signedIn, weekday) {
         meals = if (signedIn) fetchMealsForWeekday(weekday) else emptyList()
     }
+    val eatenMeals = meals.filter { it.id in confirmedMealIds }
+    val consumedCalories = eatenMeals.sumOf { it.calories }
+    val consumedProtein = eatenMeals.sumOf { it.protein_grams }
+    val consumedCarbs = eatenMeals.sumOf { it.carbs_grams }
+    val consumedFats = eatenMeals.sumOf { it.fats_grams }
     LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Spacer(Modifier.height(4.dp)); Text("Good morning, $displayName 👋", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); Text("●  Feast Window opens in 2h 15m", color = Mint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold); CoachBanner() }
-        item { Fuel(water) { water = (water + 250).coerceAtMost(3500) } }
         item { DailyCheckInCard(checkIn, signedIn, checkInStatus) { if (signedIn) showCheckIn = true } }
         item { Workout() }
-        item { Text("Meal Stream & Feast Window", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+        item { Fuel(water, consumedCalories, consumedProtein, consumedCarbs, consumedFats) { water = (water + 250).coerceAtMost(3500) } }
         if (meals.isEmpty()) {
             item { Text("No meals planned for today.", color = Muted, fontSize = 13.sp) }
         } else {
@@ -225,7 +244,12 @@ private fun NutriApp(displayName: String) {
 }
 
 @Composable
-private fun MealDetailScreen(meal: MealDto, onBack: () -> Unit) {
+private fun MealDetailScreen(
+    meal: MealDto,
+    confirmed: Boolean,
+    onBack: () -> Unit,
+    onConfirmationChanged: (Boolean) -> Unit,
+) {
     var ingredients by remember(meal.id) { mutableStateOf<List<MealIngredientDto>>(emptyList()) }
     var portionMultiplier by remember(meal.id) { mutableFloatStateOf(1f) }
     var swapIngredient by remember { mutableStateOf<MealIngredientDto?>(null) }
@@ -274,6 +298,13 @@ private fun MealDetailScreen(meal: MealDto, onBack: () -> Unit) {
             Text("Detailed Meal Nutrition Breakdown", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Text(meal.name, color = Ink, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
             Text(meal.meal_type.replace('_', ' ').uppercase(), color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Button(
+                onClick = { onConfirmationChanged(!confirmed) },
+                colors = ButtonDefaults.buttonColors(containerColor = if (confirmed) Amber else Green),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (confirmed) "MEAL CONFIRMED · TAP TO UNDO" else "CONFIRM MEAL EATEN")
+            }
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -478,12 +509,64 @@ private fun checkInSummary(checkIn: DailyCheckIn): String = buildList {
 
 @Composable private fun CoachBanner() { Row(Modifier.fillMaxWidth().padding(top = 10.dp).background(Card, RoundedCornerShape(12.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Surface(color = Amber, shape = CircleShape, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.FitnessCenter, null, tint = Color(0xFF472A00), modifier = Modifier.padding(6.dp)) }; Spacer(Modifier.width(8.dp)); Text("Coach Marcus:  “Crush that leg day feast today!”", color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
 
-@Composable private fun Fuel(water: Int, addWater: () -> Unit) { Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(14.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-    Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Bolt, null, tint = Green); Spacer(Modifier.width(8.dp)); Text("Daily Fuel Gauge", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.weight(1f)); Tag("DAY 18 OF CYCLE", Green) }
-    Row(verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(120.dp), contentAlignment = Alignment.Center) { Canvas(Modifier.fillMaxSize()) { drawArc(Track, -90f, 360f, false, style = Stroke(10.dp.toPx())); drawArc(Green, -90f, 252f, false, style = Stroke(10.dp.toPx())) }; Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("730", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold); Text("KCAL LEFT", color = Muted, fontSize = 10.sp) } }; Spacer(Modifier.width(14.dp)); Column(Modifier.weight(1f)) { Text("INTAKE SUMMARY", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("1,720 / 2,450 kcal", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold); LinearProgressIndicator({ .7f }, color = Green, trackColor = Track, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)); Text("↗ On track for evening anabolic window", color = Green, fontSize = 11.sp) } }
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { Macro("PROTEIN", "165/190g", .87f, Green, Modifier.weight(1f)); Macro("CARBS", "210/260g", .8f, Amber, Modifier.weight(1f)); Macro("FATS", "55/70g", .78f, Mint, Modifier.weight(1f)) }
-    Row(Modifier.fillMaxWidth().background(Color(0xFF131B2E), RoundedCornerShape(10.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.WaterDrop, null, tint = Mint); Spacer(Modifier.width(8.dp)); Column(Modifier.weight(1f)) { Text("Hydration Level", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold); Text("${water / 1000f}L of 3.5L Target", color = Muted, fontSize = 12.sp) }; Button(addWater, colors = ButtonDefaults.buttonColors(containerColor = High, contentColor = Mint)) { Text("+250ml", fontSize = 12.sp) } }
-} } }
+@Composable
+private fun Fuel(
+    water: Int,
+    consumedCalories: Int,
+    consumedProtein: Int,
+    consumedCarbs: Int,
+    consumedFats: Int,
+    addWater: () -> Unit,
+) {
+    val calorieTarget = 2450
+    val proteinTarget = 190
+    val carbsTarget = 260
+    val fatsTarget = 70
+    val caloriesLeft = (calorieTarget - consumedCalories).coerceAtLeast(0)
+    Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(14.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Bolt, null, tint = Green)
+                Spacer(Modifier.width(8.dp))
+                Text("Daily Fuel Gauge", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Tag("DAY 18 OF CYCLE", Green)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(120.dp), contentAlignment = Alignment.Center) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        drawArc(Track, -90f, 360f, false, style = Stroke(10.dp.toPx()))
+                        drawArc(Green, -90f, (consumedCalories.toFloat() / calorieTarget * 360f).coerceIn(0f, 360f), false, style = Stroke(10.dp.toPx()))
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("$caloriesLeft", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("KCAL LEFT", color = Muted, fontSize = 10.sp)
+                    }
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("CONFIRMED INTAKE", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("$consumedCalories / $calorieTarget kcal", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    LinearProgressIndicator({ (consumedCalories.toFloat() / calorieTarget).coerceIn(0f, 1f) }, color = Green)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Macro("PROTEIN", "$consumedProtein/${proteinTarget}g", (consumedProtein.toFloat() / proteinTarget).coerceIn(0f, 1f), Green, Modifier.weight(1f))
+                Macro("CARBS", "$consumedCarbs/${carbsTarget}g", (consumedCarbs.toFloat() / carbsTarget).coerceIn(0f, 1f), Amber, Modifier.weight(1f))
+                Macro("FATS", "$consumedFats/${fatsTarget}g", (consumedFats.toFloat() / fatsTarget).coerceIn(0f, 1f), Mint, Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth().background(Color(0xFF131B2E), RoundedCornerShape(10.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.WaterDrop, null, tint = Mint)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Hydration Level", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("${water / 1000f}L of 3.5L Target", color = Muted, fontSize = 12.sp)
+                }
+                Button(addWater, colors = ButtonDefaults.buttonColors(containerColor = High, contentColor = Mint)) { Text("+250ml", fontSize = 12.sp) }
+            }
+        }
+    }
+}
 
 @Composable private fun Macro(label: String, value: String, progress: Float, color: Color, mod: Modifier) { Column(mod.background(High, RoundedCornerShape(8.dp)).padding(8.dp)) { Text(label, color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(value, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold); LinearProgressIndicator({ progress }, color = color, trackColor = Track, modifier = Modifier.fillMaxWidth().padding(top = 5.dp)) } }
 @Composable private fun Workout() { Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(14.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.FitnessCenter, null, tint = Green); Spacer(Modifier.width(8.dp)); Text("Assigned Workout", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.weight(1f)); Tag("HEAVY DAY", Amber) }; Text("Hypertrophy Lower Body", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold); Text("+ 15m Anabolic HIIT Finisher", color = Muted, fontSize = 13.sp); Text("◷  55 mins   •   420 kcal burn est.", color = Green, fontSize = 12.sp); Button({}, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915)), shape = CircleShape) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("START WORKOUT", fontWeight = FontWeight.Bold) } } } }
