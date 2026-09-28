@@ -55,6 +55,7 @@ kotlin {
             kotlin.srcDir(generateSupabaseConfig)
             dependencies {
                 implementation(compose.runtime)
+                implementation(compose.components.resources)
                 implementation(compose.foundation)
                 implementation(compose.material3)
                 implementation(compose.ui)
@@ -67,9 +68,7 @@ kotlin {
         }
         androidMain.dependencies {
             implementation("androidx.activity:activity-compose:1.10.1")
-            // ActivityIntensityRecord is available starting with 1.2.0-alpha06.
-            // compileSdk/targetSdk 36 are required for this client generation.
-            implementation("androidx.health.connect:connect-client:1.2.0-alpha06")
+            implementation("androidx.health.connect:connect-client:1.1.0-alpha12")
             implementation("io.ktor:ktor-client-android:3.3.0")
             implementation("app.cash.sqldelight:android-driver:2.1.0")
         }
@@ -100,7 +99,7 @@ android {
 
     defaultConfig {
         applicationId = "com.reus.nutri"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"

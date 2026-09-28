@@ -9,10 +9,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.health.connect.client.HealthConnectClient
-import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.PermissionController
-import androidx.health.connect.client.aggregate.AggregateRequest
-import androidx.health.connect.client.records.ActivityIntensityRecord
+import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.WeightRecord
@@ -26,13 +24,11 @@ import java.time.ZoneId
 private const val readWeightPermission = "android.permission.health.READ_WEIGHT"
 private const val readSleepPermission = "android.permission.health.READ_SLEEP"
 private const val readStepsPermission = "android.permission.health.READ_STEPS"
-private const val readActivityPermission = "android.permission.health.READ_ACTIVITY_INTENSITY"
 
 private val readPermissions = setOf(
     readWeightPermission,
     readSleepPermission,
     readStepsPermission,
-    readActivityPermission,
 )
 
 private fun dayRange(day: String, zone: ZoneId = ZoneId.systemDefault()): Pair<Instant, Instant> {
@@ -111,20 +107,7 @@ actual object HealthDataProvider {
                     ),
                 )[StepsRecord.COUNT_TOTAL]
             }.getOrNull() else null
-            val activityIntensityAvailable = runCatching {
-                client.features.getFeatureStatus(HealthConnectFeatures.FEATURE_ACTIVITY_INTENSITY) ==
-                    HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
-            }.getOrDefault(false)
-            val activeMinutes = if (readActivityPermission in grantedPermissions && activityIntensityAvailable) runCatching {
-                client.aggregate(
-                    AggregateRequest(
-                        metrics = setOf(ActivityIntensityRecord.INTENSITY_MINUTES_TOTAL),
-                        timeRangeFilter = range,
-                    ),
-                )[ActivityIntensityRecord.INTENSITY_MINUTES_TOTAL]
-                    ?.coerceAtMost(Int.MAX_VALUE.toLong())
-                    ?.toInt()
-            }.getOrNull() else null
+            val activeMinutes: Int? = null
             val hasValue = weight != null || sleepMinutes != null || steps != null || activeMinutes != null
             HealthDailySnapshot(
                 weightGrams = weight?.weight?.inKilograms

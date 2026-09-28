@@ -4,7 +4,12 @@
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_ACTIVITY_INTENSITY" />
-    <application android:theme="@style/AppTheme" android:label="Nutri" android:name=".NutriApplication">
+    <application
+        android:theme="@style/AppTheme"
+        android:label="Fuel Forge"
+        android:icon="@drawable/fuel_forge_logo"
+        android:roundIcon="@drawable/fuel_forge_logo"
+        android:name=".NutriApplication">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

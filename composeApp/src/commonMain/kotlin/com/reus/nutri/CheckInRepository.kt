@@ -1,6 +1,9 @@
+@file:OptIn(kotlin.time.ExperimentalTime::class)
+
 package com.reus.nutri
 
 import com.reus.nutri.db.NutriDatabase
+import io.github.jan.supabase.auth.auth
 
 sealed interface SyncResult {
     data object Synced : SyncResult
