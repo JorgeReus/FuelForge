@@ -2,6 +2,9 @@ package com.reus.nutri
 
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -212,6 +215,7 @@ actual fun HealthImportAction(day: String, onSnapshot: (HealthDailySnapshot) -> 
             onSnapshot(HealthDataProvider.readDailySnapshot(day))
         }
     }) {
-        Text("Connect health data")
+        Icon(Icons.Default.Sync, contentDescription = null)
+        Text("Sync health data values")
     }
 }

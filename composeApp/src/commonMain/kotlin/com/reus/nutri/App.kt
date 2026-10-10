@@ -30,23 +30,23 @@ import nutri.composeapp.generated.resources.fuel_forge_logo
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
 import kotlinx.coroutines.launch
-private val Bg = Color(0xFF0B1326); private val Card = Color(0xFF171F33); private val High = Color(0xFF222A3D)
+private val Bg = Color(0xFF0B1326); val Card = Color(0xFF171F33); private val High = Color(0xFF222A3D)
 val Track = Color(0xFF2D3449); val Ink = Color(0xFFDAE2FD); val Muted = Color(0xFFBCCBB9)
 val Green = Color(0xFF4BE277); val Amber = Color(0xFFFFB95F); private val Mint = Color(0xFF50DFA4)
 @Composable fun App() {
     MaterialTheme {
         Surface(Modifier.fillMaxSize(), color = Bg) {
             var signedIn by remember { mutableStateOf(supabase.auth.currentUserOrNull() != null) }
-            var displayName by remember { mutableStateOf<String?>(null) }
+            var profile by remember { mutableStateOf<CurrentUserProfile?>(null) }
             LaunchedEffect(Unit) {
                 supabase.auth.sessionStatus.collect {
                     signedIn = supabase.auth.currentUserOrNull() != null
                 }
             }
             LaunchedEffect(signedIn) {
-                displayName = if (signedIn) fetchCurrentDisplayName() else null
+                profile = if (signedIn) fetchCurrentProfile() else null
             }
-            if (signedIn) NutriApp(displayName ?: "there") else LoginScreen()
+            if (signedIn) NutriApp(profile?.displayName?.takeIf { it.isNotBlank() } ?: "there", profile?.role) else LoginScreen()
         }
     }
 }
@@ -131,18 +131,21 @@ private fun LoginScreen() {
 }
 
 @Composable
-private fun NutriApp(displayName: String) {
+private fun NutriApp(displayName: String, role: ProfileRole?) {
     var page by remember { mutableIntStateOf(0) }
-    Scaffold(containerColor = Bg, topBar = { Header() }, bottomBar = {
+    val destinations = buildList {
+        add(Icons.Default.ShowChart to "Progress")
+        add(Icons.Default.Restaurant to "Meals")
+        add(Icons.Default.FitnessCenter to "Workout")
+        if (role == ProfileRole.Trainer) add(Icons.Default.Group to "Roster")
+        add(Icons.Default.TrackChanges to "Goals")
+    }
+    val selectedPage = page.coerceIn(destinations.indices)
+    Scaffold(containerColor = Bg, topBar = { Header(destinations[selectedPage].second) }, bottomBar = {
         NavigationBar(containerColor = Card) {
-            listOf(
-                Icons.Default.LocalDining to "Today",
-                Icons.Default.QrCodeScanner to "Log & Scan",
-                Icons.Default.Group to "Roster",
-                Icons.Default.TrackChanges to "Goals",
-            ).forEachIndexed { i, item ->
+            destinations.forEachIndexed { i, item ->
                 NavigationBarItem(
-                    page == i,
+                    selectedPage == i,
                     { page = i },
                     { Icon(item.first, item.second) },
                     label = { Text(item.second, fontSize = 10.sp) },
@@ -156,11 +159,17 @@ private fun NutriApp(displayName: String) {
                 )
             }
         }
-    }) { pad -> if (page == 1) Scanner(pad) else Dashboard(pad, displayName) }
+    }) { pad ->
+        when (page) {
+            1 -> MealsDiet(pad, displayName)
+            2 -> WorkoutScreen(pad)
+            else -> Dashboard(pad, displayName)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun Header() { TopAppBar(title = { Column { Text("FUEL FORGE", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("Today", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) } }, actions = { IconButton({}) { Icon(Icons.Default.Notifications, null, tint = Muted) }; Surface(color = Green, shape = CircleShape, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Person, null, tint = Color(0xFF003915), modifier = Modifier.padding(7.dp)) }; Spacer(Modifier.width(16.dp)) }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Bg)) }
+@Composable private fun Header(title: String) { TopAppBar(title = { Column { Text("FUEL FORGE", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text(title, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) } }, actions = { IconButton({}) { Icon(Icons.Default.Notifications, null, tint = Muted) }; Surface(color = Green, shape = CircleShape, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Person, null, tint = Color(0xFF003915), modifier = Modifier.padding(7.dp)) }; Spacer(Modifier.width(16.dp)) }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Bg)) }
 
 private sealed interface AppRoute {
     data object Dashboard : AppRoute
@@ -168,37 +177,15 @@ private sealed interface AppRoute {
 }
 
 @Composable private fun Dashboard(pad: PaddingValues, displayName: String) {
-    val today = remember { kotlin.time.Clock.System.now().toString().take(10) }
-    var water by remember { mutableIntStateOf(2400) }
-    var backStack by remember { mutableStateOf(listOf<AppRoute>(AppRoute.Dashboard)) }
-    var confirmedMealIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    val selectedMeal = (backStack.lastOrNull() as? AppRoute.MealDetail)?.meal
-    if (selectedMeal != null) {
-        MealDetailScreen(
-            meal = selectedMeal,
-            confirmed = selectedMeal.id in confirmedMealIds,
-            onBack = { backStack = backStack.dropLast(1) },
-            onConfirmationChanged = { confirmed ->
-                if (confirmed) {
-                    localDatabase.mealConfirmationQueries.confirmMeal(selectedMeal.id, today)
-                    confirmedMealIds = confirmedMealIds + selectedMeal.id
-                } else {
-                    localDatabase.mealConfirmationQueries.unconfirmMeal(selectedMeal.id, today)
-                    confirmedMealIds = confirmedMealIds - selectedMeal.id
-                }
-            },
-        )
-        return
-    }
+    val today = remember { currentLocalDate() }
     var showCheckIn by remember { mutableStateOf(false) }
-    var patientSchedule by remember { mutableStateOf<PatientCheckInScheduleDto?>(null) }
     var checkIn by remember { mutableStateOf<DailyCheckIn?>(null) }
     var checkInStatus by remember { mutableStateOf<String?>(null) }
+    var checkInHistory by remember { mutableStateOf<List<DailyCheckIn>?>(null) }
     val checkInRepository = remember { createCheckInRepository() }
     val signedIn = supabase.auth.currentUserOrNull() != null
-    val weekday = remember(today) { isoWeekday(today) }
-    var meals by remember { mutableStateOf<List<MealDto>>(emptyList()) }
     LaunchedEffect(signedIn) {
+        checkInHistory = if (signedIn) fetchRecentCheckIns() else emptyList()
         if (signedIn) {
             when (val result = checkInRepository.refresh(today)) {
                 is RefreshResult.Found -> { checkIn = result.checkIn; checkInStatus = "Synced" }
@@ -208,41 +195,10 @@ private sealed interface AppRoute {
             }
         }
     }
-    LaunchedEffect(signedIn) {
-        patientSchedule = if (signedIn) fetchPatientCheckInSchedule() else null
-    }
-    LaunchedEffect(today) {
-        confirmedMealIds = localDatabase.mealConfirmationQueries.confirmedMealIdsForDay(today)
-            .executeAsList().toSet()
-    }
-    LaunchedEffect(signedIn, weekday) {
-        meals = if (signedIn) fetchMealsForWeekday(weekday) else emptyList()
-    }
-    val eatenMeals = meals.filter { it.id in confirmedMealIds }
-    val currentUtcTime = kotlin.time.Clock.System.now().toString().substring(11, 16)
-    val checkInAvailable = checkIn == null &&
-        (patientSchedule == null || currentUtcTime >= patientSchedule!!.local_time.take(5))
-    val consumedCalories = eatenMeals.sumOf { it.calories }
-    val consumedProtein = eatenMeals.sumOf { it.protein_grams }
-    val consumedCarbs = eatenMeals.sumOf { it.carbs_grams }
-    val consumedFats = eatenMeals.sumOf { it.fats_grams }
     LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { Spacer(Modifier.height(4.dp)); Text("Good morning, $displayName 👋", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); CoachBanner() }
-        item { DailyCheckInCard(checkIn, signedIn, checkInAvailable, checkInStatus) { if (signedIn) showCheckIn = true } }
-        item { Workout() }
-        item { Fuel(water, consumedCalories, consumedProtein, consumedCarbs, consumedFats) { water = (water + 250).coerceAtMost(3500) } }
-        if (meals.isEmpty()) {
-            item { Text("No meals planned for today.", color = Muted, fontSize = 13.sp) }
-        } else {
-            items(meals) { meal ->
-                Meal(
-                    meal.name,
-                    meal.description,
-                    "${meal.calories} kcal · ${meal.meal_type.replace('_', ' ').uppercase()}",
-                    onClick = { backStack = backStack + AppRoute.MealDetail(meal) },
-                )
-            }
-        }
+        item { Spacer(Modifier.height(4.dp)); Text("Progress, $displayName", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); CoachBanner() }
+        item { DailyCheckInCard(checkIn, signedIn, checkInStatus) { if (signedIn) showCheckIn = true } }
+        item { CheckInTrends(checkInHistory) }
         item { Row(Modifier.fillMaxWidth().background(Color(0xFF131B2E), RoundedCornerShape(12.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Surface(color = Green, shape = CircleShape, modifier = Modifier.size(44.dp)) { Icon(Icons.Default.Person, null, tint = Color(0xFF003915), modifier = Modifier.padding(10.dp)) }; Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text("Sync with Coach", color = Ink, fontWeight = FontWeight.Bold); Text("Marcus is reviewing today's metrics", color = Muted, fontSize = 12.sp) }; Button({}) { Text("PING") } } }
         item { Spacer(Modifier.height(8.dp)) }
     }
@@ -251,8 +207,78 @@ private sealed interface AppRoute {
             initial = checkIn ?: DailyCheckIn(newIdentifier(), today),
             repository = checkInRepository,
             onDismiss = { showCheckIn = false },
-            onSaved = { checkIn = it },
+            onSaved = {
+                checkIn = it
+                checkInHistory = (checkInHistory.orEmpty().filterNot { prior -> prior.recordedOn == it.recordedOn } + it)
+                    .sortedBy(DailyCheckIn::recordedOn)
+            },
         )
+    }
+}
+
+@Composable
+private fun MealsDiet(pad: PaddingValues, displayName: String) {
+    val today = remember { currentLocalDate() }
+    val signedIn = supabase.auth.currentUserOrNull() != null
+    val weekday = remember(today) { isoWeekday(today) }
+    var water by remember { mutableIntStateOf(2400) }
+    var showScanner by remember { mutableStateOf(false) }
+    var meals by remember { mutableStateOf<List<MealDto>>(emptyList()) }
+    var confirmedMealIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var backStack by remember { mutableStateOf(listOf<AppRoute>(AppRoute.Dashboard)) }
+    val selectedMeal = (backStack.lastOrNull() as? AppRoute.MealDetail)?.meal
+    LaunchedEffect(signedIn, weekday) { meals = if (signedIn) fetchMealsForWeekday(weekday) else emptyList() }
+    LaunchedEffect(today) {
+        confirmedMealIds = localDatabase.mealConfirmationQueries.confirmedMealIdsForDay(today).executeAsList().toSet()
+    }
+    val eaten = meals.filter { it.id in confirmedMealIds }
+    if (showScanner) {
+        Scanner(pad, onBack = { showScanner = false })
+        return
+    }
+    val detail = selectedMeal
+    if (detail != null) {
+        MealDetailScreen(
+            meal = detail,
+            confirmed = detail.id in confirmedMealIds,
+            onBack = { backStack = backStack.dropLast(1) },
+            onConfirmationChanged = { confirmed ->
+                if (confirmed) localDatabase.mealConfirmationQueries.confirmMeal(detail.id, today)
+                else localDatabase.mealConfirmationQueries.unconfirmMeal(detail.id, today)
+                confirmedMealIds = if (confirmed) confirmedMealIds + detail.id else confirmedMealIds - detail.id
+            },
+        )
+        return
+    }
+    LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item {
+            Spacer(Modifier.height(4.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Meals & diet", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text("Planned for today, $displayName", color = Muted, fontSize = 13.sp)
+                }
+                TextButton(onClick = { showScanner = true }) {
+                    Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+                    Text("Log")
+                }
+            }
+        }
+        item { Fuel(water, eaten.sumOf { it.calories }, eaten.sumOf { it.protein_grams }, eaten.sumOf { it.carbs_grams }, eaten.sumOf { it.fats_grams }) { water = (water + 250).coerceAtMost(3500) } }
+        if (meals.isEmpty()) item { Text("No meals planned for today.", color = Muted, fontSize = 13.sp) }
+        else items(meals) { meal ->
+            Meal(meal.name, meal.description, "${meal.calories} kcal · ${meal.meal_type.replace('_', ' ').uppercase()}") {
+                backStack = backStack + AppRoute.MealDetail(meal)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkoutScreen(pad: PaddingValues) {
+    LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { Spacer(Modifier.height(4.dp)); Text("Workout", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); Text("Today's training plan", color = Muted, fontSize = 13.sp) }
+        item { Workout() }
     }
 }
 
@@ -495,24 +521,92 @@ private fun categoryColor(category: String): Color = when (category) {
     "legumes" -> Ink
     else -> Muted
 }
-@Composable private fun DailyCheckInCard(checkIn: DailyCheckIn?, signedIn: Boolean, available: Boolean, status: String?, onOpen: () -> Unit) {
+@Composable private fun DailyCheckInCard(checkIn: DailyCheckIn?, signedIn: Boolean, status: String?, onOpen: () -> Unit) {
 
     Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(14.dp)) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Daily check-in", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    when { !signedIn -> "Sign in required"; !available && checkIn == null -> "Available at the scheduled time"; checkIn == null -> "Take today's check-in"; else -> checkInSummary(checkIn) },
+                    when { !signedIn -> "Sign in required"; checkIn == null -> "Take today's check-in"; else -> checkInSummary(checkIn) },
                     color = if (!signedIn) Amber else Muted,
                     fontSize = 12.sp,
                 )
                 status?.let { Text(it, color = if (it.contains("pending") || it == "Offline") Amber else Green, fontSize = 11.sp) }
             }
-            Button(onClick = onOpen, enabled = signedIn && available, colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915))) {
-                Text(if (checkIn == null) "CHECK IN" else "COMPLETED")
+            if (checkIn != null) {
+                IconButton(onClick = onOpen, enabled = signedIn) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit check-in", tint = Green)
+                }
+            }
+            Button(onClick = onOpen, enabled = signedIn, colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915))) {
+                Text(if (checkIn == null) "CHECK IN" else "EDIT")
             }
         }
     }
+}
+
+@Composable
+private fun CheckInTrends(history: List<DailyCheckIn>?) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Last 7 days", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        when {
+            history == null -> Text("Loading check-in history…", color = Muted, fontSize = 13.sp)
+            history.isEmpty() -> Text("Complete a check-in to start tracking your trends.", color = Muted, fontSize = 13.sp)
+            else -> {
+                val trends = listOf(
+                    CheckInTrend("Weight", "kg") { it.weightGrams?.div(1000f) },
+                    CheckInTrend("Sleep", "hours") { it.sleepMinutes?.div(60f) },
+                    CheckInTrend("Stress", "/ 10") { it.stress?.toFloat() },
+                    CheckInTrend("Performance", "/ 10") { it.performance?.toFloat() },
+                )
+                var shown = false
+                trends.forEach { trend ->
+                    val points = history.mapNotNull { checkIn -> trend.value(checkIn)?.let { checkIn.recordedOn to it } }
+                    if (points.isNotEmpty()) {
+                        CheckInTrendCard(trend.title, trend.unit, points)
+                        shown = true
+                    }
+                }
+                if (!shown) Text("No tracked values in the past 7 days.", color = Muted, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+private data class CheckInTrend(val title: String, val unit: String, val value: (DailyCheckIn) -> Float?)
+
+@Composable
+private fun CheckInTrendCard(title: String, unit: String, points: List<Pair<String, Float>>) {
+    val latest = points.last().second
+    Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(14.dp)) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, color = Muted, fontSize = 12.sp)
+            Text("${latest.formatTrendValue()} $unit", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Canvas(Modifier.fillMaxWidth().height(64.dp)) {
+                val low = points.minOf { it.second }
+                val spread = (points.maxOf { it.second } - low).coerceAtLeast(0.1f)
+                val coordinates = points.mapIndexed { index, point ->
+                    androidx.compose.ui.geometry.Offset(
+                        x = if (points.size == 1) size.width / 2 else size.width * index / (points.size - 1),
+                        y = size.height - (point.second - low) / spread * (size.height - 12.dp.toPx()) - 6.dp.toPx(),
+                    )
+                }
+                coordinates.zipWithNext().forEach { (start, end) -> drawLine(Green, start, end, 3.dp.toPx()) }
+                coordinates.forEach { drawCircle(Green, 4.dp.toPx(), it) }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(points.first().first.takeLast(5), color = Muted, fontSize = 10.sp)
+                Text(points.last().first.takeLast(5), color = Muted, fontSize = 10.sp)
+            }
+            if (points.size == 1) Text("One check-in so far; another will show a trend.", color = Muted, fontSize = 11.sp)
+        }
+    }
+}
+
+private fun Float.formatTrendValue(): String {
+    val rounded = kotlin.math.round(this * 10) / 10
+    return if (rounded % 1f == 0f) rounded.toInt().toString() else rounded.toString()
 }
 
 private fun checkInSummary(checkIn: DailyCheckIn): String = buildList {
@@ -586,6 +680,6 @@ private fun Fuel(
 @Composable private fun Workout() { Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(14.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.FitnessCenter, null, tint = Green); Spacer(Modifier.width(8.dp)); Text("Assigned Workout", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.weight(1f)); Tag("HEAVY DAY", Amber) }; Text("Hypertrophy Lower Body", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold); Text("+ 15m Anabolic HIIT Finisher", color = Muted, fontSize = 13.sp); Text("◷  55 mins   •   420 kcal burn est.", color = Green, fontSize = 12.sp); Button({}, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915)), shape = CircleShape) { Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("START WORKOUT", fontWeight = FontWeight.Bold) } } } }
 @Composable private fun Meal(title: String, description: String, detail: String, onClick: () -> Unit) { Row(Modifier.fillMaxWidth().clickable(onClick = onClick).background(Card, RoundedCornerShape(12.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Surface(color = High, shape = RoundedCornerShape(9.dp), modifier = Modifier.size(42.dp)) { Icon(Icons.Default.Restaurant, null, tint = Green, modifier = Modifier.padding(10.dp)) }; Spacer(Modifier.width(10.dp)); Column { Text(title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold); Text(description, color = Muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis); Text(detail, color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold) } } }
 
-@Composable private fun Scanner(pad: PaddingValues) { var portion by remember { mutableIntStateOf(1) }; var logged by remember { mutableStateOf(false) }; LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { item { Spacer(Modifier.height(4.dp)); Text("Log & Scan", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); Text("Capture your next feast", color = Muted); Row(Modifier.fillMaxWidth().background(Color(0xFF060E20), RoundedCornerShape(12.dp)).padding(4.dp)) { listOf("AI SNAP", "BARCODE", "MANUAL").forEach { FilterChip(true, {}, { Text(it, fontSize = 11.sp) }, Modifier.weight(1f)) } } }; item { Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Box(Modifier.fillMaxWidth().height(190.dp).background(Color(0xFF18243A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.Restaurant, null, tint = Mint, modifier = Modifier.size(52.dp)); Text("98% MATCH", color = Green, fontWeight = FontWeight.Bold); Text("Omega-3 Rich Wild Salmon + Quinoa", color = Ink, fontSize = 12.sp) } }; Text("DETECTED FEAST", color = Amber, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("Flame-Grilled Salmon Power Bowl", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) } } }; item { Card(colors = CardDefaults.cardColors(Color(0xFF131B2E)), shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Text("${640 * portion} KCAL TOTAL", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { Macro("PROTEIN", "${48 * portion}g", .82f, Green, Modifier.weight(1f)); Macro("CARBS", "${52 * portion}g", .65f, Amber, Modifier.weight(1f)); Macro("FATS", "${24 * portion}g", .48f, Mint, Modifier.weight(1f)) }; Row(Modifier.fillMaxWidth().background(Card, RoundedCornerShape(10.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("PORTION SCALE", color = Muted, fontSize = 11.sp); Text("$portion serving (${380 * portion}g)", color = Ink, fontWeight = FontWeight.Bold) }; IconButton({ portion = (portion - 1).coerceAtLeast(1) }) { Text("−", color = Ink, fontSize = 24.sp) }; Text("$portion.0", color = Green, fontWeight = FontWeight.Bold); IconButton({ portion = (portion + 1).coerceAtMost(4) }) { Icon(Icons.Default.Add, null, tint = Ink) } }; Button({ logged = true }, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915)), shape = CircleShape) { Text(if (logged) "✓ FEAST LOGGED" else "CONFIRM & LOG FEAST", fontWeight = FontWeight.Bold) } } } }; item { Text("Coach Marcus' Recipes", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) }; items(listOf("High-Protein Anabolic Chili" to "580 kcal · 52g Protein", "Crispy Honey Lime Chicken" to "620 kcal · 58g Protein", "Loaded Sweet Potato Mash" to "410 kcal · 28g Protein")) { Recipe(it.first, it.second) } } }
+@Composable private fun Scanner(pad: PaddingValues, onBack: (() -> Unit)? = null) { var portion by remember { mutableIntStateOf(1) }; var logged by remember { mutableStateOf(false) }; LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { if (onBack != null) item { TextButton(onClick = onBack) { Text("‹ Back to meals", color = Green) } }; item { Spacer(Modifier.height(4.dp)); Text("Log & Scan", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); Text("Capture your next feast", color = Muted); Row(Modifier.fillMaxWidth().background(Color(0xFF060E20), RoundedCornerShape(12.dp)).padding(4.dp)) { listOf("AI SNAP", "BARCODE", "MANUAL").forEach { FilterChip(true, {}, { Text(it, fontSize = 11.sp) }, Modifier.weight(1f)) } } }; item { Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Box(Modifier.fillMaxWidth().height(190.dp).background(Color(0xFF18243A), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.Restaurant, null, tint = Mint, modifier = Modifier.size(52.dp)); Text("98% MATCH", color = Green, fontWeight = FontWeight.Bold); Text("Omega-3 Rich Wild Salmon + Quinoa", color = Ink, fontSize = 12.sp) } }; Text("DETECTED FEAST", color = Amber, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("Flame-Grilled Salmon Power Bowl", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) } } }; item { Card(colors = CardDefaults.cardColors(Color(0xFF131B2E)), shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Text("${640 * portion} KCAL TOTAL", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold); Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { Macro("PROTEIN", "${48 * portion}g", .82f, Green, Modifier.weight(1f)); Macro("CARBS", "${52 * portion}g", .65f, Amber, Modifier.weight(1f)); Macro("FATS", "${24 * portion}g", .48f, Mint, Modifier.weight(1f)) }; Row(Modifier.fillMaxWidth().background(Card, RoundedCornerShape(10.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("PORTION SCALE", color = Muted, fontSize = 11.sp); Text("$portion serving (${380 * portion}g)", color = Ink, fontWeight = FontWeight.Bold) }; IconButton({ portion = (portion - 1).coerceAtLeast(1) }) { Text("−", color = Ink, fontSize = 24.sp) }; Text("$portion.0", color = Green, fontWeight = FontWeight.Bold); IconButton({ portion = (portion + 1).coerceAtMost(4) }) { Icon(Icons.Default.Add, null, tint = Ink) } }; Button({ logged = true }, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915)), shape = CircleShape) { Text(if (logged) "✓ FEAST LOGGED" else "CONFIRM & LOG FEAST", fontWeight = FontWeight.Bold) } } } }; item { Text("Coach Marcus' Recipes", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) }; items(listOf("High-Protein Anabolic Chili" to "580 kcal · 52g Protein", "Crispy Honey Lime Chicken" to "620 kcal · 58g Protein", "Loaded Sweet Potato Mash" to "410 kcal · 28g Protein")) { Recipe(it.first, it.second) } } }
 @Composable private fun Recipe(title: String, detail: String) { Row(Modifier.fillMaxWidth().background(Card, RoundedCornerShape(14.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(72.dp).background(High, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Default.Restaurant, null, tint = Amber) }; Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f)) { Text("MARCUS APPROVED", color = Amber, fontSize = 10.sp, fontWeight = FontWeight.Bold); Text(title, color = Ink, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(detail, color = Muted, fontSize = 12.sp) }; IconButton({}) { Icon(Icons.Default.Add, null, tint = Green) } } }
 @Composable private fun Tag(text: String, color: Color) { Surface(color = color.copy(alpha = .18f), shape = RoundedCornerShape(50)) { Text(text, color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) } }

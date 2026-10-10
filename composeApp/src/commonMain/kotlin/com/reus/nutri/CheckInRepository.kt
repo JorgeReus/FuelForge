@@ -85,6 +85,13 @@ class CheckInRepository(
 fun prefillFromHealth(checkIn: DailyCheckIn, snapshot: HealthDailySnapshot): DailyCheckIn =
     checkIn.copy(
         weightGrams = checkIn.weightGrams ?: snapshot.weightGrams,
+        heartRateBpm = checkIn.heartRateBpm ?: snapshot.heartRateBpm,
+        heightMillimeters = checkIn.heightMillimeters ?: snapshot.heightMillimeters,
+        bodyFatPercentage = checkIn.bodyFatPercentage ?: snapshot.bodyFatPercentage,
+        bodyWaterGrams = checkIn.bodyWaterGrams ?: snapshot.bodyWaterGrams,
+        boneMassGrams = checkIn.boneMassGrams ?: snapshot.boneMassGrams,
+        leanBodyMassGrams = checkIn.leanBodyMassGrams ?: snapshot.leanBodyMassGrams,
+        basalMetabolicRateKcalPerDay = checkIn.basalMetabolicRateKcalPerDay ?: snapshot.basalMetabolicRateKcalPerDay,
         sleepMinutes = checkIn.sleepMinutes ?: snapshot.sleepMinutes,
         neatMinutes = checkIn.neatMinutes ?: snapshot.activeMinutes,
     )

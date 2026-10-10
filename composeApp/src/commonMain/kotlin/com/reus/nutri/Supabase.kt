@@ -13,6 +13,13 @@ data class PatientCheckInDto(
     val user_id: String,
     val recorded_on: String,
     val weight_grams: Int? = null,
+    val heart_rate_bpm: Int? = null,
+    val height_millimeters: Int? = null,
+    val body_fat_percentage: Double? = null,
+    val body_water_grams: Int? = null,
+    val bone_mass_grams: Int? = null,
+    val lean_body_mass_grams: Int? = null,
+    val basal_metabolic_rate_kcal_per_day: Int? = null,
     val soreness: Int? = null,
     val performance: Int? = null,
     val motivation: Int? = null,
@@ -38,7 +45,19 @@ data class PatientCheckInScheduleDto(
 @Serializable
 private data class ProfileDto(
     val display_name: String = "",
+    val role: String? = null,
 )
+
+enum class ProfileRole(val databaseValue: String) {
+    Patient("patient"),
+    Trainer("trainer");
+
+    companion object {
+        fun fromDatabase(value: String?): ProfileRole? = entries.firstOrNull { it.databaseValue == value }
+    }
+}
+
+data class CurrentUserProfile(val displayName: String, val role: ProfileRole?)
 
 suspend fun fetchPatientCheckInSchedule(): PatientCheckInScheduleDto? {
     val userId = supabase.auth.currentUserOrNull()?.id ?: return null
@@ -50,12 +69,14 @@ suspend fun fetchPatientCheckInSchedule(): PatientCheckInScheduleDto? {
 }
 
 /** Loads the display name for the currently authenticated user. */
-suspend fun fetchCurrentDisplayName(): String? {
+suspend fun fetchCurrentProfile(): CurrentUserProfile? {
     val userId = supabase.auth.currentUserOrNull()?.id ?: return null
     return runCatching {
         supabase.from("profiles").select {
             filter { eq("id", userId) }
-        }.decodeList<ProfileDto>().firstOrNull()?.display_name?.trim()?.takeIf { it.isNotEmpty() }
+        }.decodeList<ProfileDto>().firstOrNull()?.let {
+            CurrentUserProfile(it.display_name.trim(), ProfileRole.fromDatabase(it.role))
+        }
     }.getOrNull()
 }
 
@@ -146,6 +167,21 @@ suspend fun fetchCheckIn(day: String): RemoteFetchResult {
     }
 }
 
+suspend fun fetchRecentCheckIns(days: Int = 7): List<DailyCheckIn>? {
+    val userId = supabase.auth.currentUserOrNull()?.id ?: return null
+    return runCatching {
+        supabase.from("patient_check_ins").select {
+            filter {
+                eq("user_id", userId)
+                and {
+                    gte("recorded_on", localDateDaysAgo((days - 1).coerceAtLeast(0)))
+                    lte("recorded_on", currentLocalDate())
+                }
+            }
+        }.decodeList<PatientCheckInDto>().map { it.toDomain() }.sortedBy { it.recordedOn }
+    }.getOrNull()
+}
+
 suspend fun upsertCheckIn(dto: PatientCheckInDto): SyncResult {
     val userId = supabase.auth.currentUserOrNull()?.id ?: return SyncResult.SignedOut
     if (dto.user_id != userId) return SyncResult.SignedOut
@@ -159,6 +195,13 @@ fun PatientCheckInDto.toDomain(): DailyCheckIn = DailyCheckIn(
     id = id,
     recordedOn = recorded_on,
     weightGrams = weight_grams,
+    heartRateBpm = heart_rate_bpm,
+    heightMillimeters = height_millimeters,
+    bodyFatPercentage = body_fat_percentage,
+    bodyWaterGrams = body_water_grams,
+    boneMassGrams = bone_mass_grams,
+    leanBodyMassGrams = lean_body_mass_grams,
+    basalMetabolicRateKcalPerDay = basal_metabolic_rate_kcal_per_day,
     soreness = soreness,
     performance = performance,
     motivation = motivation,
@@ -176,6 +219,13 @@ fun DailyCheckIn.toDto(userId: String): PatientCheckInDto = PatientCheckInDto(
     user_id = userId,
     recorded_on = recordedOn,
     weight_grams = weightGrams,
+    heart_rate_bpm = heartRateBpm,
+    height_millimeters = heightMillimeters,
+    body_fat_percentage = bodyFatPercentage,
+    body_water_grams = bodyWaterGrams,
+    bone_mass_grams = boneMassGrams,
+    lean_body_mass_grams = leanBodyMassGrams,
+    basal_metabolic_rate_kcal_per_day = basalMetabolicRateKcalPerDay,
     soreness = soreness,
     performance = performance,
     motivation = motivation,
