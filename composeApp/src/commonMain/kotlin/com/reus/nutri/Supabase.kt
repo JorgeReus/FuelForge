@@ -25,9 +25,29 @@ data class PatientCheckInDto(
     val comments: String = "",
 )
 @Serializable
+data class PatientCheckInScheduleDto(
+    val patient_id: String,
+    val name: String = "Daily check-in",
+    val frequency: String = "daily",
+    val interval_weeks: Int = 1,
+    val weekday: Int? = null,
+    val local_time: String = "09:00:00",
+    val timezone: String = "UTC",
+    val anchor_date: String = "",
+)
+@Serializable
 private data class ProfileDto(
     val display_name: String = "",
 )
+
+suspend fun fetchPatientCheckInSchedule(): PatientCheckInScheduleDto? {
+    val userId = supabase.auth.currentUserOrNull()?.id ?: return null
+    return runCatching {
+        supabase.from("patient_check_in_schedules").select {
+            filter { eq("patient_id", userId) }
+        }.decodeList<PatientCheckInScheduleDto>().firstOrNull()
+    }.getOrNull()
+}
 
 /** Loads the display name for the currently authenticated user. */
 suspend fun fetchCurrentDisplayName(): String? {

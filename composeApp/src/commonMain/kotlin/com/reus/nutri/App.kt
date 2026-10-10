@@ -160,7 +160,7 @@ private fun NutriApp(displayName: String) {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun Header() { TopAppBar(title = { Column { Text("FEAST FIT", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("Today (Feast)", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) } }, actions = { IconButton({}) { Icon(Icons.Default.Notifications, null, tint = Muted) }; Surface(color = Green, shape = CircleShape, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Person, null, tint = Color(0xFF003915), modifier = Modifier.padding(7.dp)) }; Spacer(Modifier.width(16.dp)) }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Bg)) }
+@Composable private fun Header() { TopAppBar(title = { Column { Text("FUEL FORGE", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("Today", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) } }, actions = { IconButton({}) { Icon(Icons.Default.Notifications, null, tint = Muted) }; Surface(color = Green, shape = CircleShape, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Person, null, tint = Color(0xFF003915), modifier = Modifier.padding(7.dp)) }; Spacer(Modifier.width(16.dp)) }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Bg)) }
 
 private sealed interface AppRoute {
     data object Dashboard : AppRoute
@@ -191,6 +191,7 @@ private sealed interface AppRoute {
         return
     }
     var showCheckIn by remember { mutableStateOf(false) }
+    var patientSchedule by remember { mutableStateOf<PatientCheckInScheduleDto?>(null) }
     var checkIn by remember { mutableStateOf<DailyCheckIn?>(null) }
     var checkInStatus by remember { mutableStateOf<String?>(null) }
     val checkInRepository = remember { createCheckInRepository() }
@@ -207,6 +208,9 @@ private sealed interface AppRoute {
             }
         }
     }
+    LaunchedEffect(signedIn) {
+        patientSchedule = if (signedIn) fetchPatientCheckInSchedule() else null
+    }
     LaunchedEffect(today) {
         confirmedMealIds = localDatabase.mealConfirmationQueries.confirmedMealIdsForDay(today)
             .executeAsList().toSet()
@@ -215,13 +219,16 @@ private sealed interface AppRoute {
         meals = if (signedIn) fetchMealsForWeekday(weekday) else emptyList()
     }
     val eatenMeals = meals.filter { it.id in confirmedMealIds }
+    val currentUtcTime = kotlin.time.Clock.System.now().toString().substring(11, 16)
+    val checkInAvailable = checkIn == null &&
+        (patientSchedule == null || currentUtcTime >= patientSchedule!!.local_time.take(5))
     val consumedCalories = eatenMeals.sumOf { it.calories }
     val consumedProtein = eatenMeals.sumOf { it.protein_grams }
     val consumedCarbs = eatenMeals.sumOf { it.carbs_grams }
     val consumedFats = eatenMeals.sumOf { it.fats_grams }
     LazyColumn(Modifier.padding(pad).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { Spacer(Modifier.height(4.dp)); Text("Good morning, $displayName 👋", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); Text("●  Feast Window opens in 2h 15m", color = Mint, fontSize = 14.sp, fontWeight = FontWeight.SemiBold); CoachBanner() }
-        item { DailyCheckInCard(checkIn, signedIn, checkInStatus) { if (signedIn) showCheckIn = true } }
+        item { Spacer(Modifier.height(4.dp)); Text("Good morning, $displayName 👋", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold); CoachBanner() }
+        item { DailyCheckInCard(checkIn, signedIn, checkInAvailable, checkInStatus) { if (signedIn) showCheckIn = true } }
         item { Workout() }
         item { Fuel(water, consumedCalories, consumedProtein, consumedCarbs, consumedFats) { water = (water + 250).coerceAtMost(3500) } }
         if (meals.isEmpty()) {
@@ -488,21 +495,21 @@ private fun categoryColor(category: String): Color = when (category) {
     "legumes" -> Ink
     else -> Muted
 }
-@Composable private fun DailyCheckInCard(checkIn: DailyCheckIn?, signedIn: Boolean, status: String?, onOpen: () -> Unit) {
+@Composable private fun DailyCheckInCard(checkIn: DailyCheckIn?, signedIn: Boolean, available: Boolean, status: String?, onOpen: () -> Unit) {
 
     Card(colors = CardDefaults.cardColors(Card), shape = RoundedCornerShape(14.dp)) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Daily check-in", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    when { !signedIn -> "Sign in required"; checkIn == null -> "Take today's check-in"; else -> checkInSummary(checkIn) },
+                    when { !signedIn -> "Sign in required"; !available && checkIn == null -> "Available at the scheduled time"; checkIn == null -> "Take today's check-in"; else -> checkInSummary(checkIn) },
                     color = if (!signedIn) Amber else Muted,
                     fontSize = 12.sp,
                 )
                 status?.let { Text(it, color = if (it.contains("pending") || it == "Offline") Amber else Green, fontSize = 11.sp) }
             }
-            Button(onClick = onOpen, enabled = signedIn, colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915))) {
-                Text(if (checkIn == null) "CHECK IN" else "EDIT")
+            Button(onClick = onOpen, enabled = signedIn && available, colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color(0xFF003915))) {
+                Text(if (checkIn == null) "CHECK IN" else "COMPLETED")
             }
         }
     }
