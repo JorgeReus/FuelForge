@@ -162,23 +162,29 @@ private fun NutriApp(displayName: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun Header() { TopAppBar(title = { Column { Text("FEAST FIT", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold); Text("Today (Feast)", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) } }, actions = { IconButton({}) { Icon(Icons.Default.Notifications, null, tint = Muted) }; Surface(color = Green, shape = CircleShape, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Person, null, tint = Color(0xFF003915), modifier = Modifier.padding(7.dp)) }; Spacer(Modifier.width(16.dp)) }, colors = TopAppBarDefaults.topAppBarColors(containerColor = Bg)) }
 
+private sealed interface AppRoute {
+    data object Dashboard : AppRoute
+    data class MealDetail(val meal: MealDto) : AppRoute
+}
+
 @Composable private fun Dashboard(pad: PaddingValues, displayName: String) {
     val today = remember { kotlin.time.Clock.System.now().toString().take(10) }
     var water by remember { mutableIntStateOf(2400) }
-    var selectedMeal by remember { mutableStateOf<MealDto?>(null) }
+    var backStack by remember { mutableStateOf(listOf<AppRoute>(AppRoute.Dashboard)) }
     var confirmedMealIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val selectedMeal = (backStack.lastOrNull() as? AppRoute.MealDetail)?.meal
     if (selectedMeal != null) {
         MealDetailScreen(
-            meal = selectedMeal!!,
-            confirmed = selectedMeal!!.id in confirmedMealIds,
-            onBack = { selectedMeal = null },
+            meal = selectedMeal,
+            confirmed = selectedMeal.id in confirmedMealIds,
+            onBack = { backStack = backStack.dropLast(1) },
             onConfirmationChanged = { confirmed ->
                 if (confirmed) {
-                    localDatabase.mealConfirmationQueries.confirmMeal(selectedMeal!!.id, today)
-                    confirmedMealIds = confirmedMealIds + selectedMeal!!.id
+                    localDatabase.mealConfirmationQueries.confirmMeal(selectedMeal.id, today)
+                    confirmedMealIds = confirmedMealIds + selectedMeal.id
                 } else {
-                    localDatabase.mealConfirmationQueries.unconfirmMeal(selectedMeal!!.id, today)
-                    confirmedMealIds = confirmedMealIds - selectedMeal!!.id
+                    localDatabase.mealConfirmationQueries.unconfirmMeal(selectedMeal.id, today)
+                    confirmedMealIds = confirmedMealIds - selectedMeal.id
                 }
             },
         )
@@ -226,7 +232,7 @@ private fun NutriApp(displayName: String) {
                     meal.name,
                     meal.description,
                     "${meal.calories} kcal · ${meal.meal_type.replace('_', ' ').uppercase()}",
-                    onClick = { selectedMeal = meal },
+                    onClick = { backStack = backStack + AppRoute.MealDetail(meal) },
                 )
             }
         }
@@ -253,6 +259,7 @@ private fun MealDetailScreen(
     var ingredients by remember(meal.id) { mutableStateOf<List<MealIngredientDto>>(emptyList()) }
     var portionMultiplier by remember(meal.id) { mutableFloatStateOf(1f) }
     var swapIngredient by remember { mutableStateOf<MealIngredientDto?>(null) }
+    SystemBackHandler(enabled = true, onBack = { if (swapIngredient != null) swapIngredient = null else onBack() })
     LaunchedEffect(meal.id) { ingredients = fetchMealIngredients(meal.id) }
     if (swapIngredient != null) {
         SwapIngredientScreen(
